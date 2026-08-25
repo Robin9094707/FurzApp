@@ -267,6 +267,7 @@ struct RecorderView: View {
     @Query(sort: \FartFolder.name) private var folders: [FartFolder]
     @Query(sort: \FartGeofence.name) private var geofences: [FartGeofence]
     @StateObject private var recorder = AudioRecorder()
+    @StateObject private var previewPlayer = AudioPlayerService()
     @StateObject private var locationService = LocationService.shared
     @AppStorage("location.captureEnabled") private var locationCaptureEnabled = false
     @AppStorage("partner.enabled") private var partnerEnabled = false
@@ -294,6 +295,10 @@ struct RecorderView: View {
     @State private var saveError: String?
     @State private var didSave = false
     @State private var didAutoStart = false
+    @State private var previewSamples: [CGFloat] = []
+    @State private var trimStart: Double = 0
+    @State private var trimEnd: Double = 0.1
+    @State private var isSaving = false
 
     init(autoStart: Bool = false) {
         self.autoStart = autoStart
@@ -347,7 +352,14 @@ struct RecorderView: View {
                 recorder.requestPermissionAndStart()
                 Haptics.impact(.heavy)
             }
+            .onChange(of: previewPlayer.currentTime) { _, value in
+                if previewPlayer.isPlaying && value >= trimEnd {
+                    previewPlayer.pause()
+                    previewPlayer.seek(to: trimStart)
+                }
+            }
             .onDisappear {
+                previewPlayer.stop()
                 if !didSave { recorder.cancelAndCleanup() }
             }
         }
@@ -386,6 +398,7 @@ struct RecorderView: View {
                     Button {
                         recorder.stop()
                         Haptics.success()
+                        prepareRecordingPreview()
                         if locationCaptureEnabled { Task { await captureCurrentLocation() } }
                     } label: {
                         Label("Aufnahme stoppen", systemImage: "stop.circle.fill")
@@ -404,12 +417,13 @@ struct RecorderView: View {
                         }
                         .buttonStyle(.bordered)
                         Button {
-                            saveRecording()
+                            Task { await saveRecording() }
                         } label: {
-                            Label("Furz sichern", systemImage: "checkmark.circle.fill")
+                            Label(isSaving ? "Speichere …" : "Furz sichern", systemImage: "checkmark.circle.fill")
                                 .frame(maxWidth: .infinity)
                         }
                         .buttonStyle(.borderedProminent)
+                        .disabled(isSaving)
                     }
                 }
             }
@@ -421,6 +435,44 @@ struct RecorderView: View {
             VStack(alignment: .leading, spacing: 16) {
                 Text("Details vor dem Speichern")
                     .font(.headline)
+
+                VStack(alignment: .leading, spacing: 10) {
+                    HStack {
+                        Label("Vorschau & Sofort-Zuschnitt", systemImage: "waveform")
+                            .font(.subheadline.bold())
+                        Spacer()
+                        Text(formatTime(max(0, trimEnd - trimStart)))
+                            .font(.caption.monospacedDigit())
+                            .foregroundStyle(.secondary)
+                    }
+                    WaveformView(
+                        samples: previewSamples.isEmpty ? (recorder.levels.isEmpty ? Array(repeating: 0.07, count: 70) : recorder.levels) : previewSamples,
+                        progress: trimEnd > 0 ? previewPlayer.currentTime / trimEnd : 0,
+                        height: 66
+                    )
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text("Start · \(formatTime(trimStart))").font(.caption.bold())
+                        Slider(value: $trimStart, in: 0...max(0.05, trimEnd - 0.05))
+                        Text("Ende · \(formatTime(trimEnd))").font(.caption.bold())
+                        Slider(value: $trimEnd, in: min(max(recorder.elapsed, 0.1), trimStart + 0.05)...max(recorder.elapsed, trimStart + 0.05))
+                    }
+                    HStack {
+                        Button { previewSelectedRecording() } label: {
+                            Label(previewPlayer.isPlaying ? "Pause" : "Ausschnitt anhören", systemImage: previewPlayer.isPlaying ? "pause.fill" : "play.fill")
+                        }
+                        .buttonStyle(.borderedProminent)
+                        Button {
+                            previewPlayer.pause()
+                            trimStart = 0
+                            trimEnd = max(recorder.elapsed, 0.1)
+                        } label: {
+                            Label("Reset", systemImage: "arrow.counterclockwise")
+                        }
+                        .buttonStyle(.bordered)
+                    }
+                }
+
+                Divider()
 
                 TextField("Name", text: $title)
                     .textFieldStyle(.roundedBorder)
@@ -499,40 +551,67 @@ struct RecorderView: View {
         isResolvingLocation = false
     }
 
-    private func saveRecording() {
+    @MainActor
+    private func prepareRecordingPreview() {
+        guard let url = recorder.temporaryURL else { return }
+        trimStart = 0
+        trimEnd = max(recorder.elapsed, 0.1)
+        previewPlayer.load(url: url)
+        Task {
+            do { previewSamples = try await WaveformAnalyzer.shared.samples(for: url, count: 90) }
+            catch { DebugLogger.shared.log("Recorder-Vorschau Waveform: \(error.localizedDescription)") }
+        }
+    }
+
+    private func previewSelectedRecording() {
+        if previewPlayer.isPlaying {
+            previewPlayer.pause()
+            return
+        }
+        previewPlayer.seek(to: trimStart)
+        previewPlayer.play()
+        Haptics.impact(.light)
+    }
+
+    @MainActor
+    private func saveRecording() async {
         guard let tempURL = recorder.takeTemporaryURL() else { return }
+        previewPlayer.stop()
+        isSaving = true
+        defer { isSaving = false }
         do {
-            let audio = try AudioFileStore.commitRecording(from: tempURL)
+            let committed = try AudioFileStore.commitRecording(from: tempURL)
+            var finalFilename = committed.filename
+            var finalDuration = committed.duration
+            var wasTrimmed = false
+
+            let safeEnd = min(max(trimEnd, 0.1), committed.duration)
+            let safeStart = min(max(trimStart, 0), max(0, safeEnd - 0.05))
+            if safeStart > 0.01 || safeEnd < committed.duration - 0.01 {
+                let trimmed = try await AudioTrimmer.trim(filename: committed.filename, start: safeStart, end: safeEnd)
+                AudioFileStore.delete(filename: committed.filename)
+                finalFilename = trimmed.filename
+                finalDuration = trimmed.duration
+                wasTrimmed = true
+            }
+
             let tags = tagsText.split(separator: ",")
                 .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
                 .filter { !$0.isEmpty }
             let entry = FartEntry(
                 title: title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? "Unbenannter Furz" : title,
-                eventDate: eventDate,
-                loudness: loudness,
-                smellRating: smellRating,
-                personalRating: personalRating,
-                duration: audio.duration,
-                audioFilename: audio.filename,
-                source: .recorded,
-                locationText: locationText,
-                contextText: contextText,
-                notes: notes,
-                tags: tags,
-                folderID: folderID,
-                isFavorite: isFavorite,
-                latitude: latitude,
-                longitude: longitude,
-                resolvedAddress: resolvedAddress,
-                geofenceName: geofenceName,
-                isShared: isShared
+                eventDate: eventDate, loudness: loudness, smellRating: smellRating, personalRating: personalRating,
+                duration: finalDuration, audioFilename: finalFilename, source: .recorded, locationText: locationText,
+                contextText: contextText, notes: notes, tags: tags, folderID: folderID, isFavorite: isFavorite,
+                isTrimmed: wasTrimmed, latitude: latitude, longitude: longitude, resolvedAddress: resolvedAddress,
+                geofenceName: geofenceName, isShared: isShared
             )
             modelContext.insert(entry)
             try modelContext.save()
             didSave = true
             Haptics.success()
             DebugLogger.shared.log("Eigene Furz-Aufnahme als Eintrag gespeichert")
-            Task { await PartnerAPI.shared.upload(entry: entry) }
+            await PartnerAPI.shared.upload(entry: entry)
             dismiss()
         } catch {
             saveError = error.localizedDescription

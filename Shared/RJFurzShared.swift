@@ -119,12 +119,29 @@ public enum QuickRecordRequest {
     }
 }
 
-public struct QuickFartRecordIntent: AppIntent {
-    public static let title: LocalizedStringResource = "Furzaufnahme starten"
-    public static let description = IntentDescription("Öffnet die RJ Furz-App sofort im Aufnahme-Modus.")
-    public static var supportedModes: IntentModes { [.foreground(.immediate)] }
+public enum QuickLaunchTarget: String, AppEnum {
+    case recorder
 
-    public init() {}
+    public static var typeDisplayRepresentation: TypeDisplayRepresentation = "RJ Furz-App Ziel"
+    public static var caseDisplayRepresentations: [QuickLaunchTarget: DisplayRepresentation] = [
+        .recorder: "Notfall-Furzaufnahme"
+    ]
+}
+
+public struct OpenQuickFartRecorderIntent: OpenIntent {
+    public static let title: LocalizedStringResource = "Furzaufnahme starten"
+    public static let description = IntentDescription("Öffnet die RJ Furz-App direkt im Aufnahme-Modus.")
+
+    @Parameter(title: "Ziel")
+    public var target: QuickLaunchTarget
+
+    public init() {
+        self.target = .recorder
+    }
+
+    public init(target: QuickLaunchTarget) {
+        self.target = target
+    }
 
     public func perform() async throws -> some IntentResult {
         QuickRecordRequest.markRequested()

@@ -82,6 +82,16 @@ final class LocationService: NSObject, ObservableObject, CLLocationManagerDelega
         guard value >= 0 else { return nil }
         return Int((value * 100).rounded())
     }
+
+    var batteryStateText: String {
+        switch UIDevice.current.batteryState {
+        case .charging: "charging"
+        case .full: "full"
+        case .unplugged: "unplugged"
+        case .unknown: "unknown"
+        @unknown default: "unknown"
+        }
+    }
 }
 
 enum AddressResolver {
@@ -178,6 +188,7 @@ struct PartnerFriend: Codable, Identifiable, Hashable {
     let username: String
     let status: String
     let battery: Int?
+    let batteryState: String?
     let latitude: Double?
     let longitude: Double?
     let locationUpdatedAt: Date?
@@ -228,6 +239,14 @@ struct PartnerNudge: Codable, Identifiable, Hashable {
     let message: String
     let createdAt: Date
     let status: String
+    let delaySeconds: Int?
+}
+
+struct PartnerRefreshRequest: Codable, Identifiable, Hashable {
+    let id: String
+    let from: String
+    let createdAt: Date
+    let status: String
 }
 
 struct PartnerFartUpload: Codable {
@@ -253,11 +272,12 @@ private struct PresencePayload: Codable {
     let latitude: Double?
     let longitude: Double?
     let battery: Int?
+    let batteryState: String
     let shareLocation: Bool
     let shareBattery: Bool
     let lastFartAt: Date?
 }
-private struct NudgePayload: Codable { let message: String }
+private struct NudgePayload: Codable { let message: String; let delaySeconds: Int }
 private struct CommentPayload: Codable { let text: String }
 private struct SimpleResponse: Codable { let ok: Bool }
 private struct FartCreateResponse: Codable { let id: String }
@@ -369,9 +389,22 @@ final class PartnerAPI: ObservableObject {
         return try decoder.decode([PartnerLeaderboardEntry].self, from: data)
     }
 
-    func sendNudge(to username: String, message: String) async throws {
-        let payload = try encoder.encode(NudgePayload(message: message))
+    func sendNudge(to username: String, message: String, delaySeconds: Int = 60) async throws {
+        let payload = try encoder.encode(NudgePayload(message: message, delaySeconds: max(5, min(delaySeconds, 3600))))
         _ = try await request(path: "/api/nudges/\(escape(username))", method: "POST", body: payload)
+    }
+
+    func requestRefresh(friend username: String) async throws {
+        _ = try await request(path: "/api/friends/\(escape(username))/refresh", method: "POST")
+    }
+
+    func refreshRequests() async throws -> [PartnerRefreshRequest] {
+        let data = try await request(path: "/api/refresh-requests", method: "GET")
+        return try decoder.decode([PartnerRefreshRequest].self, from: data)
+    }
+
+    func acknowledgeRefresh(id: String) async throws {
+        _ = try await request(path: "/api/refresh-requests/\(escape(id))/ack", method: "POST")
     }
 
     func nudges() async throws -> [PartnerNudge] {
@@ -396,6 +429,7 @@ final class PartnerAPI: ObservableObject {
                 latitude: shareLocation ? location?.coordinate.latitude : nil,
                 longitude: shareLocation ? location?.coordinate.longitude : nil,
                 battery: shareBattery ? battery : nil,
+                batteryState: LocationService.shared.batteryStateText,
                 shareLocation: shareLocation,
                 shareBattery: shareBattery,
                 lastFartAt: lastFartAt
@@ -407,6 +441,35 @@ final class PartnerAPI: ObservableObject {
         } catch {
             lastError = error.localizedDescription
             DebugLogger.shared.log("Partner-Presence Sync: \(error.localizedDescription)")
+        }
+    }
+
+    func processRemoteCommands(lastFartAt: Date?) async {
+        guard enabled, token != nil else { return }
+        do {
+            let refreshes = try await refreshRequests().filter { $0.status == "pending" }
+            if !refreshes.isEmpty {
+                LocationService.shared.requestCurrentLocation()
+                try? await Task.sleep(for: .milliseconds(350))
+                await syncPresence(location: LocationService.shared.location, battery: LocationService.shared.batteryPercent, lastFartAt: lastFartAt)
+                for request in refreshes { try? await acknowledgeRefresh(id: request.id) }
+            }
+
+            let pending = try await nudges().filter { $0.status == "pending" }
+            for nudge in pending {
+                do {
+                    try await FartAlarmKitService.schedulePartnerNudge(
+                        title: "@\(nudge.from): \(nudge.message)",
+                        after: TimeInterval(nudge.delaySeconds ?? 60)
+                    )
+                    try await respondToNudge(id: nudge.id, accept: true)
+                    DebugLogger.shared.log("Furz-Anstupser automatisch als Alarm übernommen")
+                } catch {
+                    DebugLogger.shared.log("Remote-Alarm noch nicht möglich: \(error.localizedDescription)")
+                }
+            }
+        } catch {
+            DebugLogger.shared.log("Remote-Kommandos: \(error.localizedDescription)")
         }
     }
 
@@ -511,6 +574,7 @@ final class PartnerPresenceCoordinator: ObservableObject {
                     battery: LocationService.shared.batteryPercent,
                     lastFartAt: self.lastFartAt
                 )
+                await PartnerAPI.shared.processRemoteCommands(lastFartAt: self.lastFartAt)
             }
         }
     }
@@ -526,6 +590,7 @@ final class PartnerPresenceCoordinator: ObservableObject {
                 battery: LocationService.shared.batteryPercent,
                 lastFartAt: lastFartAt
             )
+            await PartnerAPI.shared.processRemoteCommands(lastFartAt: lastFartAt)
         }
     }
 }

@@ -219,6 +219,9 @@ final class AudioPlayerService: NSObject, ObservableObject, AVAudioPlayerDelegat
     func load(url: URL) {
         stop()
         do {
+            let session = AVAudioSession.sharedInstance()
+            try session.setCategory(.playback, mode: .default, options: [])
+            try session.setActive(true)
             let player = try AVAudioPlayer(contentsOf: url)
             player.delegate = self
             player.enableRate = true
@@ -238,6 +241,13 @@ final class AudioPlayerService: NSObject, ObservableObject, AVAudioPlayerDelegat
 
     func play() {
         guard let player else { return }
+        do {
+            let session = AVAudioSession.sharedInstance()
+            try session.setCategory(.playback, mode: .default, options: [])
+            try session.setActive(true)
+        } catch {
+            DebugLogger.shared.log("AudioSession Playback: \(error.localizedDescription)")
+        }
         player.rate = rate
         player.play()
         isPlaying = true
@@ -259,6 +269,7 @@ final class AudioPlayerService: NSObject, ObservableObject, AVAudioPlayerDelegat
         duration = 0
         timer?.invalidate()
         timer = nil
+        try? AVAudioSession.sharedInstance().setActive(false, options: .notifyOthersOnDeactivation)
     }
 
     func seek(to value: TimeInterval) {

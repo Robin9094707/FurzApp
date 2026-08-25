@@ -374,6 +374,7 @@ struct TrimAudioView: View {
             entry.isTrimmed = true
             entry.updatedAt = .now
             try? modelContext.save()
+            await PartnerAPI.shared.upload(entry: entry)
             Haptics.success()
             dismiss()
         } catch {

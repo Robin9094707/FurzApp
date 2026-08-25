@@ -13,12 +13,14 @@ struct MainTabView: View {
     @State private var importedAudio: ImportedAudio?
     @State private var importError: String?
     @State private var autoStartRecorder = false
-    @State private var pendingPartnerNudge: PartnerNudge?
-    @State private var partnerNudgeError: String?
 
     var body: some View {
         TabView(selection: $selectedTab) {
-            DashboardView(showRecorder: $showRecorder, showImporter: $showImporter)
+            DashboardView(showRecorder: $showRecorder, showImporter: $showImporter) {
+                autoStartRecorder = true
+                showRecorder = true
+                Haptics.impact(.heavy)
+            }
                 .tabItem { Label("Heute", systemImage: "sparkles") }
                 .tag(0)
 
@@ -69,23 +71,6 @@ struct MainTabView: View {
         } message: {
             Text(importError ?? "Unbekannter Fehler")
         }
-        .alert("Dein Furzfreund denkt an dich 💨", isPresented: Binding(
-            get: { pendingPartnerNudge != nil },
-            set: { if !$0 { pendingPartnerNudge = nil } }
-        )) {
-            Button("Wecker in 1 Minute") {
-                if let nudge = pendingPartnerNudge { Task { await respondToPartnerNudge(nudge, accept: true) } }
-            }
-            Button("Nicht jetzt", role: .cancel) {
-                if let nudge = pendingPartnerNudge { Task { await respondToPartnerNudge(nudge, accept: false) } }
-            }
-        } message: {
-            Text(pendingPartnerNudge.map { "@\($0.from): \($0.message)\n\nErst deine Bestätigung legt lokal einen Alarm an." } ?? "")
-        }
-        .alert("Furzfreunde-Fehler", isPresented: Binding(
-            get: { partnerNudgeError != nil },
-            set: { if !$0 { partnerNudgeError = nil } }
-        )) { Button("OK") { partnerNudgeError = nil } } message: { Text(partnerNudgeError ?? "") }
         .onAppear { refreshSharedState() }
         .onChange(of: scenePhase) { _, phase in
             if phase == .active { refreshSharedState() }
@@ -104,7 +89,7 @@ struct MainTabView: View {
         PartnerPresenceCoordinator.shared.configure(entries: allEntries)
         Task {
             await NotificationManager.shared.refreshInactivity(reminders: allReminders, entries: allEntries)
-            await checkPartnerNudges()
+            await PartnerAPI.shared.processRemoteCommands(lastFartAt: allEntries.map(\.eventDate).max())
         }
         if QuickRecordRequest.consumeIfRecent() {
             autoStartRecorder = true
@@ -112,29 +97,6 @@ struct MainTabView: View {
         }
     }
 
-    @MainActor
-    private func checkPartnerNudges() async {
-        guard UserDefaults.standard.bool(forKey: PartnerAPI.enabledKey), PartnerAPI.shared.isConnected, pendingPartnerNudge == nil else { return }
-        do {
-            pendingPartnerNudge = try await PartnerAPI.shared.nudges().first(where: { $0.status == "pending" })
-        } catch {
-            DebugLogger.shared.log("Nudge-Abruf fehlgeschlagen: \(error.localizedDescription)")
-        }
-    }
-
-    @MainActor
-    private func respondToPartnerNudge(_ nudge: PartnerNudge, accept: Bool) async {
-        do {
-            try await PartnerAPI.shared.respondToNudge(id: nudge.id, accept: accept)
-            if accept {
-                try await FartAlarmKitService.schedulePartnerNudge(title: "@\(nudge.from): \(nudge.message)")
-                Haptics.success()
-            }
-            pendingPartnerNudge = nil
-        } catch {
-            partnerNudgeError = error.localizedDescription
-        }
-    }
 }
 
 struct DashboardView: View {
@@ -142,6 +104,7 @@ struct DashboardView: View {
     @Query(sort: \FartFolder.name) private var folders: [FartFolder]
     @Binding var showRecorder: Bool
     @Binding var showImporter: Bool
+    let onInstantRecord: () -> Void
 
     private var todayEntries: [FartEntry] {
         entries.filter { Calendar.current.isDateInToday($0.eventDate) }
@@ -162,6 +125,7 @@ struct DashboardView: View {
                 RJBackground()
                 ScrollView {
                     VStack(spacing: 18) {
+                        instantRecordButton
                         hero
                         metrics
                         quickActions
@@ -174,7 +138,7 @@ struct DashboardView: View {
             .toolbar {
                 ToolbarItem(placement: .topBarTrailing) {
                     Button {
-                        showRecorder = true
+                        onInstantRecord()
                     } label: {
                         Image(systemName: "mic.fill")
                     }
@@ -182,6 +146,31 @@ struct DashboardView: View {
                 }
             }
         }
+    }
+
+    private var instantRecordButton: some View {
+        Button(action: onInstantRecord) {
+            VStack(spacing: 8) {
+                ZStack {
+                    Circle()
+                        .fill(.thinMaterial)
+                        .frame(width: 116, height: 116)
+                        .overlay(Circle().strokeBorder(Color.accentColor.opacity(0.35), lineWidth: 1.5))
+                        .shadow(radius: 18, y: 8)
+                    Text("💨")
+                        .font(.system(size: 58))
+                }
+                Text("Sofort aufnehmen")
+                    .font(.headline)
+                Text("Ein Tipp – und der Recorder läuft.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+            .frame(maxWidth: .infinity)
+            .padding(.vertical, 8)
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel("Furz sofort aufnehmen")
     }
 
     private var hero: some View {
@@ -219,7 +208,7 @@ struct DashboardView: View {
                 Text("Schnellaktionen")
                     .font(.headline)
                 HStack(spacing: 10) {
-                    quickButton("Aufnehmen", icon: "mic.fill") { showRecorder = true }
+                    quickButton("Aufnehmen", icon: "mic.fill") { onInstantRecord() }
                     quickButton("Import", icon: "square.and.arrow.down") { showImporter = true }
                 }
                 NavigationLink {

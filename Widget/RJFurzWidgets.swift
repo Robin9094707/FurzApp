@@ -13,37 +13,22 @@ private struct FartWidgetEntry: TimelineEntry {
 
 private struct FartWidgetProvider: TimelineProvider {
     func placeholder(in context: Context) -> FartWidgetEntry {
-        FartWidgetEntry(
-            date: .now,
-            count: 7,
-            score: 420,
-            slogan: "Windpark RJ ist online.",
-            period: .sevenDays,
-            updatedAt: .now
-        )
+        FartWidgetEntry(date: .now, count: 7, score: 420, slogan: "Windpark RJ ist online.", period: .sevenDays, updatedAt: .now)
     }
 
-    func getSnapshot(in context: Context, completion: @escaping (FartWidgetEntry) -> Void) {
-        completion(makeEntry())
-    }
+    func getSnapshot(in context: Context, completion: @escaping (FartWidgetEntry) -> Void) { completion(makeEntry()) }
 
     func getTimeline(in context: Context, completion: @escaping (Timeline<FartWidgetEntry>) -> Void) {
-        let entry = makeEntry()
-        completion(Timeline(entries: [entry], policy: .after(Date().addingTimeInterval(5 * 60))))
+        completion(Timeline(entries: [makeEntry()], policy: .after(Date().addingTimeInterval(5 * 60))))
     }
 
     private func makeEntry() -> FartWidgetEntry {
         let period = RJFurzShared.defaultPeriod
         let count = RJFurzShared.count(for: period)
         let score = RJFurzShared.score
-        return FartWidgetEntry(
-            date: .now,
-            count: count,
-            score: score,
-            slogan: RJFurzShared.slogan(count: count, score: score),
-            period: period,
-            updatedAt: RJFurzShared.updatedAt
-        )
+        return FartWidgetEntry(date: .now, count: count, score: score,
+                               slogan: RJFurzShared.slogan(count: count, score: score),
+                               period: period, updatedAt: RJFurzShared.updatedAt)
     }
 }
 
@@ -64,97 +49,133 @@ private struct FartCounterWidgetView: View {
     let entry: FartWidgetEntry
 
     var body: some View {
-        VStack(alignment: .leading, spacing: family == .systemSmall ? 6 : 9) {
-            HStack(spacing: 8) {
+        Group {
+            if family == .systemSmall { small }
+            else { expanded }
+        }
+        .containerBackground(for: .widget) {
+            LinearGradient(colors: [Color.purple.opacity(0.30), Color.orange.opacity(0.20)],
+                           startPoint: .topLeading, endPoint: .bottomTrailing)
+        }
+        .widgetURL(RJFurzShared.quickRecordURL)
+    }
+
+    private var small: some View {
+        VStack(spacing: 4) {
+            HStack(spacing: 5) {
                 Image(systemName: "wind")
-                    .font(.title2.bold())
+                    .font(.caption.bold())
+                    .foregroundStyle(.tint)
+                Text("RJ Furz")
+                    .font(.caption.bold())
+                    .lineLimit(1)
+                Spacer(minLength: 2)
+                Image(systemName: "mic.fill")
+                    .font(.caption.bold())
+                    .foregroundStyle(.tint)
+            }
+
+            Spacer(minLength: 0)
+            Text("💨")
+                .font(.system(size: 31))
+                .accessibilityLabel("Furz-Wind")
+            HStack(alignment: .firstTextBaseline, spacing: 3) {
+                Text("\(entry.count)")
+                    .font(.system(size: 30, weight: .black, design: .rounded))
+                    .monospacedDigit()
+                    .minimumScaleFactor(0.65)
+                Text("Fürze")
+                    .font(.caption.bold())
+                    .foregroundStyle(.secondary)
+            }
+            .lineLimit(1)
+            Text(entry.period.widgetTitle)
+                .font(.caption2.bold())
+                .foregroundStyle(.secondary)
+                .lineLimit(1)
+            Text(entry.slogan)
+                .font(.caption2.weight(.semibold))
+                .multilineTextAlignment(.center)
+                .lineLimit(2)
+                .minimumScaleFactor(0.75)
+            Spacer(minLength: 0)
+        }
+    }
+
+    private var expanded: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(spacing: 7) {
+                Image(systemName: "wind")
+                    .font(.headline.bold())
                     .foregroundStyle(.tint)
                 Text("RJ Furz")
                     .font(.headline)
                 Spacer()
-                Link(destination: RJFurzShared.quickRecordURL) {
-                    Image(systemName: "mic.circle.fill")
-                        .font(.title2)
-                        .symbolRenderingMode(.hierarchical)
-                }
-                .accessibilityLabel("Sofort Furzaufnahme starten")
-            }
-
-            Spacer(minLength: 0)
-
-            HStack(alignment: .firstTextBaseline, spacing: 5) {
-                Text("\(entry.count)")
-                    .font(.system(size: family == .systemSmall ? 42 : 50, weight: .black, design: .rounded))
-                    .monospacedDigit()
-                    .contentTransition(.numericText())
-                Text("Fürze")
-                    .font(.headline)
-                    .foregroundStyle(.secondary)
-            }
-
-            HStack {
-                Text(entry.period.widgetTitle)
+                Label("Aufnehmen", systemImage: "mic.fill")
                     .font(.caption.bold())
-                    .foregroundStyle(.secondary)
-                Spacer()
-                if family != .systemSmall {
-                    Label("\(entry.score)", systemImage: "sparkles")
+                    .foregroundStyle(.tint)
+            }
+
+            HStack(spacing: 12) {
+                Text("💨")
+                    .font(.system(size: family == .systemLarge ? 52 : 40))
+                VStack(alignment: .leading, spacing: 1) {
+                    HStack(alignment: .firstTextBaseline, spacing: 5) {
+                        Text("\(entry.count)")
+                            .font(.system(size: family == .systemLarge ? 48 : 40, weight: .black, design: .rounded))
+                            .monospacedDigit()
+                        Text("Fürze")
+                            .font(.headline)
+                            .foregroundStyle(.secondary)
+                    }
+                    Text(entry.period.widgetTitle)
                         .font(.caption.bold())
                         .foregroundStyle(.secondary)
                 }
+                Spacer(minLength: 0)
             }
 
             Text(entry.slogan)
-                .font(family == .systemSmall ? .caption.weight(.semibold) : .subheadline.weight(.semibold))
+                .font(.subheadline.weight(.semibold))
                 .lineLimit(family == .systemLarge ? 3 : 2)
+                .minimumScaleFactor(0.8)
 
-            if family == .systemLarge {
-                Divider()
-                HStack {
-                    Label("Antippen öffnet die Notfall-Aufnahme", systemImage: "mic.fill")
-                    Spacer()
-                    if let updatedAt = entry.updatedAt {
-                        Text(updatedAt, style: .relative)
-                    }
+            Spacer(minLength: 0)
+            HStack {
+                Label("Score \(entry.score)", systemImage: "sparkles")
+                Spacer()
+                if let updatedAt = entry.updatedAt {
+                    Text(updatedAt, style: .relative)
                 }
-                .font(.caption2)
-                .foregroundStyle(.secondary)
             }
+            .font(.caption2)
+            .foregroundStyle(.secondary)
         }
-        .containerBackground(for: .widget) {
-            LinearGradient(
-                colors: [Color.purple.opacity(0.28), Color.orange.opacity(0.18)],
-                startPoint: .topLeading,
-                endPoint: .bottomTrailing
-            )
-        }
-        .widgetURL(RJFurzShared.quickRecordURL)
     }
 }
 
 private struct FartCounterWidget: Widget {
-    let kind = "eu.rjuhas.furzapp.counter.v2"
+    let kind = "eu.rjuhas.furzapp.counter.v3"
 
     var body: some WidgetConfiguration {
         StaticConfiguration(kind: kind, provider: FartWidgetProvider()) { entry in
             FartCounterWidgetView(entry: entry)
         }
         .configurationDisplayName("RJ Furzzähler")
-        .description("Zeigt deinen Furzzähler und öffnet mit einem Tipp sofort die Aufnahme.")
+        .description("Furzzähler mit Notfall-Aufnahme – kompakt, gut lesbar und mit 💨.")
         .supportedFamilies([.systemSmall, .systemMedium, .systemLarge])
-        .contentMarginsDisabled()
     }
 }
 
 private struct QuickFartControl: ControlWidget {
     var body: some ControlWidgetConfiguration {
-        StaticControlConfiguration(kind: "eu.rjuhas.furzapp.quickrecord.v2") {
-            ControlWidgetButton(action: QuickFartRecordIntent()) {
-                Label("Notfall-Furz", systemImage: "mic.fill")
+        StaticControlConfiguration(kind: "eu.rjuhas.furzapp.quickrecord.v3") {
+            ControlWidgetButton(action: OpenQuickFartRecorderIntent()) {
+                Label("Furzaufnahme", systemImage: "wind")
             }
         }
-        .displayName("Furzaufnahme")
-        .description("Öffnet die RJ Furz-App sofort im Recorder.")
+        .displayName("Notfall-Furz")
+        .description("Öffnet die RJ Furz-App direkt im Recorder.")
     }
 }
 

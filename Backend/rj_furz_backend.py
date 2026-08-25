@@ -33,7 +33,7 @@ except ImportError:
     print("Missing dependencies. Install with: pip install fastapi uvicorn")
     raise
 
-APP_VERSION = "2.0.0"
+APP_VERSION = "2.2.0"
 ROOT = Path(__file__).resolve().parent
 CONFIG_PATH = ROOT / "furz_backend_config.json"
 USERNAME_RE = re.compile(r"^[A-Za-z0-9_.-]{2,32}$")
@@ -221,6 +221,7 @@ def presence_view(viewer: dict[str, Any], target: dict[str, Any]) -> dict[str, A
     battery_allowed = target["username"] == viewer["username"] or (are_friends(viewer, target["username"]) and p.get("shareBattery", False))
     return {
         "battery": p.get("battery") if battery_allowed else None,
+        "batteryState": p.get("batteryState") if battery_allowed else None,
         "latitude": p.get("latitude") if location_allowed else None,
         "longitude": p.get("longitude") if location_allowed else None,
         "locationUpdatedAt": p.get("updatedAt") if location_allowed else None,
@@ -267,8 +268,9 @@ async def register(request: Request) -> dict[str, Any]:
             "friends": [],
             "incoming": [],
             "outgoing": [],
-            "presence": {"shareLocation": False, "shareBattery": False, "updatedAt": None, "lastFartAt": None},
+            "presence": {"shareLocation": False, "shareBattery": False, "batteryState": "unknown", "updatedAt": None, "lastFartAt": None},
             "nudges": [],
+            "refreshRequests": [],
         }
         save_user(user)
     return {"token": issue_token(username), "username": username, "created": True}
@@ -389,6 +391,41 @@ def friend_remove(friend_name: str, user: dict[str, Any] = Depends(current_user)
     return {"ok": True}
 
 
+@app.post("/api/friends/{target_name}/refresh")
+def request_friend_refresh(target_name: str, user: dict[str, Any] = Depends(current_user)) -> dict[str, bool]:
+    target_name = clean_username(target_name)
+    if target_name not in user.get("friends", []):
+        raise HTTPException(403, "Nur Furzfreunde können aktualisiert werden")
+    target = load_user(target_name)
+    if not target: raise HTTPException(404, "Benutzer nicht gefunden")
+    with LOCK:
+        target = load_user(target_name) or target
+        target.setdefault("refreshRequests", []).append({
+            "id": secrets.token_urlsafe(9), "from": user["username"], "createdAt": iso(), "status": "pending"
+        })
+        target["refreshRequests"] = target["refreshRequests"][-100:]
+        save_user(target)
+    return {"ok": True}
+
+
+@app.get("/api/refresh-requests")
+def get_refresh_requests(user: dict[str, Any] = Depends(current_user)) -> list[dict[str, Any]]:
+    current = load_user(user["username"]) or user
+    return sorted(current.get("refreshRequests", []), key=lambda x: x.get("createdAt", ""), reverse=True)
+
+
+@app.post("/api/refresh-requests/{request_id}/ack")
+def ack_refresh_request(request_id: str, user: dict[str, Any] = Depends(current_user)) -> dict[str, bool]:
+    with LOCK:
+        current = load_user(user["username"]) or user
+        item = next((x for x in current.get("refreshRequests", []) if x.get("id") == request_id), None)
+        if not item: raise HTTPException(404, "Aktualisierungsanfrage nicht gefunden")
+        item["status"] = "done"
+        item["respondedAt"] = iso()
+        save_user(current)
+    return {"ok": True}
+
+
 @app.post("/api/presence")
 async def presence(request: Request, user: dict[str, Any] = Depends(current_user)) -> dict[str, bool]:
     body = await request.json()
@@ -400,6 +437,7 @@ async def presence(request: Request, user: dict[str, Any] = Depends(current_user
         "latitude": float(body["latitude"]) if share_location and body.get("latitude") is not None else None,
         "longitude": float(body["longitude"]) if share_location and body.get("longitude") is not None else None,
         "battery": max(0, min(100, int(body["battery"]))) if share_battery and body.get("battery") is not None else None,
+        "batteryState": str(body.get("batteryState", "unknown"))[:20] if share_battery else None,
         "lastFartAt": body.get("lastFartAt"),
         "updatedAt": iso(),
     }
@@ -530,7 +568,8 @@ async def nudge(target_name: str, request: Request, user: dict[str, Any] = Depen
     target = load_user(target_name)
     if not target: raise HTTPException(404, "Benutzer nicht gefunden")
     body = await request.json(); message = str(body.get("message", "Zeit für einen Furz 💨")).strip()[:300]
-    target.setdefault("nudges", []).append({"id": secrets.token_urlsafe(10), "from": user["username"], "message": message, "createdAt": iso(), "status": "pending"})
+    delay_seconds = max(5, min(3600, int(body.get("delaySeconds", 60))))
+    target.setdefault("nudges", []).append({"id": secrets.token_urlsafe(10), "from": user["username"], "message": message, "createdAt": iso(), "status": "pending", "delaySeconds": delay_seconds})
     target["nudges"] = target["nudges"][-200:]; save_user(target)
     return {"ok": True}
 

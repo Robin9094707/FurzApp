@@ -23,15 +23,27 @@ struct FriendsHomeView: View {
     @State private var leaderboard: [PartnerLeaderboardEntry] = []
     @State private var requests: [String] = []
     @State private var scope: FriendsMapScope = .both
+    @State private var mapDays: Double = 7
     @State private var isLoading = false
     @State private var errorMessage: String?
+    @State private var refreshNotice: String?
 
     private var locatedFriends: [PartnerFriend] {
         friends.filter { $0.latitude != nil && $0.longitude != nil }
     }
 
     private var locatedFarts: [PartnerFartDTO] {
-        feed.filter { $0.latitude != nil && $0.longitude != nil }
+        let cutoff = Date().addingTimeInterval(-max(1, mapDays) * 24 * 60 * 60)
+        return feed.filter { $0.latitude != nil && $0.longitude != nil && $0.eventDate >= cutoff }
+    }
+
+    private var recentFeed: [PartnerFartDTO] {
+        let cutoff = Date().addingTimeInterval(-7 * 24 * 60 * 60)
+        return feed.filter { $0.eventDate >= cutoff }
+    }
+
+    private var mapRangeLabel: String {
+        mapDays <= 1 ? "24 Stunden" : "\(Int(mapDays)) Tage"
     }
 
     var body: some View {
@@ -48,10 +60,11 @@ struct FriendsHomeView: View {
             .toolbar {
                 ToolbarItemGroup(placement: .topBarTrailing) {
                     if enabled && api.isConnected {
-                        Button { Task { await reload() } } label: {
-                            Image(systemName: "arrow.clockwise")
+                        Button { Task { await forceRefreshAll() } } label: {
+                            Image(systemName: "arrow.triangle.2.circlepath")
                         }
                         .disabled(isLoading)
+                        .accessibilityLabel("Standort und Akku aller Freunde aktualisieren")
                     }
                     NavigationLink {
                         PartnerHubView()
@@ -66,6 +79,14 @@ struct FriendsHomeView: View {
             }
             .refreshable {
                 if enabled && api.isConnected { await reload() }
+            }
+            .alert("Aktualisierung angefragt", isPresented: Binding(
+                get: { refreshNotice != nil },
+                set: { if !$0 { refreshNotice = nil } }
+            )) {
+                Button("OK") { refreshNotice = nil }
+            } message: {
+                Text(refreshNotice ?? "")
             }
             .alert("Furzfreunde-Fehler", isPresented: Binding(
                 get: { errorMessage != nil },
@@ -192,7 +213,11 @@ struct FriendsHomeView: View {
                     }
                 }
             }
-            .frame(height: 355)
+            .mapControls {
+                MapCompass()
+                MapScaleView()
+            }
+            .frame(height: 390)
 
             VStack(spacing: 10) {
                 Picker("Karteninhalt", selection: $scope) {
@@ -202,10 +227,30 @@ struct FriendsHomeView: View {
                 }
                 .pickerStyle(.segmented)
 
+                VStack(spacing: 5) {
+                    HStack {
+                        Text("Furzhistorie auf der Karte")
+                            .font(.caption.bold())
+                        Spacer()
+                        Text(mapRangeLabel)
+                            .font(.caption.bold())
+                            .foregroundStyle(.tint)
+                    }
+                    Slider(value: $mapDays, in: 1...30, step: 1)
+                    HStack {
+                        Text("24 h").font(.caption2)
+                        Spacer()
+                        Text("7 T").font(.caption2)
+                        Spacer()
+                        Text("30 T").font(.caption2)
+                    }
+                    .foregroundStyle(.secondary)
+                }
+
                 HStack {
                     Label("\(friends.count) Freunde", systemImage: "person.2.fill")
                     Spacer()
-                    Label("\(feed.count) Fürze · 7 Tage", systemImage: "wind")
+                    Label("\(locatedFarts.count) Fürze", systemImage: "wind")
                 }
                 .font(.caption.bold())
                 .foregroundStyle(.secondary)
@@ -324,12 +369,12 @@ struct FriendsHomeView: View {
                     .foregroundStyle(.secondary)
             }
 
-            if feed.isEmpty {
+            if recentFeed.isEmpty {
                 ContentUnavailableView("Noch windstill", systemImage: "wind", description: Text("Geteilte Fürze deiner Freunde erscheinen hier."))
                     .padding(.vertical, 12)
             } else {
                 VStack(spacing: 0) {
-                    ForEach(Array(feed.prefix(12).enumerated()), id: \.element.id) { index, fart in
+                    ForEach(Array(recentFeed.prefix(12).enumerated()), id: \.element.id) { index, fart in
                         NavigationLink {
                             PartnerFartDetailView(fart: fart)
                         } label: {
@@ -338,7 +383,7 @@ struct FriendsHomeView: View {
                                 .padding(.vertical, 11)
                         }
                         .buttonStyle(.plain)
-                        if index < min(feed.count, 12) - 1 { Divider().padding(.leading, 58) }
+                        if index < min(recentFeed.count, 12) - 1 { Divider().padding(.leading, 58) }
                     }
                 }
                 .premiumGlass(in: RoundedRectangle(cornerRadius: 22, style: .continuous))
@@ -394,7 +439,7 @@ struct FriendsHomeView: View {
         defer { isLoading = false }
         do {
             async let f = api.friends()
-            async let p = api.feed(days: 7)
+            async let p = api.feed(days: 30)
             async let l = api.leaderboard(days: 7)
             async let r = api.friendRequests()
             friends = try await f
@@ -406,6 +451,25 @@ struct FriendsHomeView: View {
             errorMessage = error.localizedDescription
         }
     }
+    @MainActor
+    private func forceRefreshAll() async {
+        guard !friends.isEmpty else {
+            await reload()
+            return
+        }
+        isLoading = true
+        do {
+            for friend in friends {
+                try? await api.requestRefresh(friend: friend.username)
+            }
+            PartnerPresenceCoordinator.shared.configure(entries: localEntries)
+            try? await Task.sleep(for: .seconds(1))
+            await reload()
+            refreshNotice = "Die Aktualisierung wurde an deine Furzfreunde geschickt. Wenn deren App gerade aktiv ist oder Hintergrund-Standortfreigabe läuft, melden Standort, Akku und Ladestatus sich automatisch neu."
+        }
+        isLoading = false
+    }
+
 }
 
 private struct FriendFindCard: View {
@@ -420,9 +484,9 @@ private struct FriendFindCard: View {
                 }
                 Spacer()
                 if let battery = friend.battery {
-                    Label("\(battery)%", systemImage: battery < 20 ? "battery.25percent" : "battery.100percent")
+                    Label("\(battery)%", systemImage: friend.batteryState == "charging" ? "battery.100percent.bolt" : (battery < 20 ? "battery.25percent" : "battery.100percent"))
                         .font(.caption.bold())
-                        .foregroundStyle(battery < 20 ? .orange : .secondary)
+                        .foregroundStyle(friend.batteryState == "charging" ? .green : (battery < 20 ? .orange : .secondary))
                 }
             }
             VStack(alignment: .leading, spacing: 4) {
@@ -485,6 +549,8 @@ struct FriendFindDetailView: View {
     let feed: [PartnerFartDTO]
     @StateObject private var api = PartnerAPI.shared
     @State private var nudgeMessage = "Zeit für einen legendären Furz 💨"
+    @State private var nudgeDelay = 60
+    @State private var confirmNudge = false
     @State private var sentMessage: String?
     @State private var errorMessage: String?
 
@@ -525,14 +591,25 @@ struct FriendFindDetailView: View {
                             }
                             Spacer()
                             if let battery = friend.battery {
-                                Label("\(battery)%", systemImage: "battery.100percent")
+                                Label("\(battery)%", systemImage: friend.batteryState == "charging" ? "battery.100percent.bolt" : "battery.100percent")
                                     .font(.headline)
+                                    .foregroundStyle(friend.batteryState == "charging" ? .green : .primary)
                             }
                         }
                         Divider()
                         LabeledContent("Heute", value: "\(friend.todayCount) Fürze")
                         LabeledContent("Letzte 7 Tage", value: "\(friend.sevenDayCount) Fürze")
                         LabeledContent("Furz-Score", value: "\(friend.score7d)")
+                        if let state = friend.batteryState {
+                            LabeledContent("Strom", value: state == "charging" ? "lädt gerade ⚡️" : (state == "full" ? "voll geladen" : "nicht am Strom"))
+                        }
+                        Button {
+                            Task { await requestFriendRefresh() }
+                        } label: {
+                            Label("Standort, Akku & Ladestatus aktualisieren", systemImage: "arrow.triangle.2.circlepath")
+                                .frame(maxWidth: .infinity)
+                        }
+                        .buttonStyle(.bordered)
                         if let last = friend.lastFartAt {
                             LabeledContent("Letzter Furz", value: last.formatted(date: .abbreviated, time: .shortened))
                         }
@@ -545,14 +622,24 @@ struct FriendFindDetailView: View {
                         TextField("Nachricht", text: $nudgeMessage, axis: .vertical)
                             .lineLimit(2...4)
                             .textFieldStyle(.roundedBorder)
+                        Picker("Wecker in", selection: $nudgeDelay) {
+                            Text("1 Min").tag(60)
+                            Text("5 Min").tag(300)
+                            Text("10 Min").tag(600)
+                            Text("30 Min").tag(1800)
+                        }
+                        .pickerStyle(.segmented)
                         Button {
-                            Task { await sendNudge() }
+                            confirmNudge = true
                         } label: {
                             Label("@\(friend.username) anstupsen", systemImage: "bell.and.waves.left.and.right.fill")
                                 .frame(maxWidth: .infinity)
                         }
                         .buttonStyle(.borderedProminent)
                         .disabled(nudgeMessage.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                        Text("Nach deiner Bestätigung wird der Anstupser gesendet. Beim Empfänger wird der Alarm ohne zweiten Bestätigungsdialog angelegt, sobald iOS der Furz-App Hintergrund- oder Vordergrund-Ausführungszeit gibt.")
+                            .font(.footnote)
+                            .foregroundStyle(.secondary)
                     }
                 }
 
@@ -583,6 +670,12 @@ struct FriendFindDetailView: View {
         }
         .navigationTitle(friend.username)
         .navigationBarTitleDisplayMode(.inline)
+        .confirmationDialog("Furz-Anstupser wirklich senden?", isPresented: $confirmNudge) {
+            Button("Anstupser senden") { Task { await sendNudge() } }
+            Button("Abbrechen", role: .cancel) { }
+        } message: {
+            Text("@\(friend.username) bekommt den personalisierten Furzwecker in \(nudgeDelay / 60) Minute(n): \(nudgeMessage)")
+        }
         .alert("Gesendet", isPresented: Binding(
             get: { sentMessage != nil }, set: { if !$0 { sentMessage = nil } }
         )) { Button("OK") { sentMessage = nil } } message: { Text(sentMessage ?? "") }
@@ -592,10 +685,21 @@ struct FriendFindDetailView: View {
     }
 
     @MainActor
+    private func requestFriendRefresh() async {
+        do {
+            try await api.requestRefresh(friend: friend.username)
+            sentMessage = "Aktualisierung für @\(friend.username) angefordert. Sobald das andere iPhone der App Ausführungszeit gibt, werden Standort, Akku und Ladestatus neu gemeldet."
+            Haptics.impact(.medium)
+        } catch {
+            errorMessage = error.localizedDescription
+        }
+    }
+
+    @MainActor
     private func sendNudge() async {
         do {
-            try await api.sendNudge(to: friend.username, message: nudgeMessage.trimmingCharacters(in: .whitespacesAndNewlines))
-            sentMessage = "@\(friend.username) wurde angestupst. 💨"
+            try await api.sendNudge(to: friend.username, message: nudgeMessage.trimmingCharacters(in: .whitespacesAndNewlines), delaySeconds: nudgeDelay)
+            sentMessage = "@\(friend.username) wurde angestupst. Der Alarm ist für \(nudgeDelay / 60) Minute(n) vorgesehen. 💨"
             Haptics.success()
         } catch {
             errorMessage = error.localizedDescription

@@ -1,1 +1,0 @@
-Temporary RJ Furz-App 2.2 update payload. This directory is created only to transfer the validated app update to GitHub Actions and is removed automatically by the update/build workflow.
