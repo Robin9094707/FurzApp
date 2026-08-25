@@ -111,7 +111,13 @@ public enum QuickRecordRequest {
         RJFurzShared.defaults.set(Date().timeIntervalSince1970, forKey: key)
     }
 
-    public static func consumeIfRecent(maxAge: TimeInterval = 30) -> Bool {
+    public static func hasRecent(maxAge: TimeInterval = 120) -> Bool {
+        let value = RJFurzShared.defaults.double(forKey: key)
+        guard value > 0 else { return false }
+        return Date().timeIntervalSince1970 - value <= maxAge
+    }
+
+    public static func consumeIfRecent(maxAge: TimeInterval = 120) -> Bool {
         let value = RJFurzShared.defaults.double(forKey: key)
         guard value > 0 else { return false }
         RJFurzShared.defaults.removeObject(forKey: key)

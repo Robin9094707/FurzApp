@@ -347,7 +347,8 @@ struct RecorderView: View {
                 Text(saveError ?? recorder.errorMessage ?? "Unbekannter Fehler")
             }
             .onAppear {
-                guard autoStart, !didAutoStart else { return }
+                let requestedByWidgetOrControl = QuickRecordRequest.consumeIfRecent()
+                guard (autoStart || requestedByWidgetOrControl), !didAutoStart else { return }
                 didAutoStart = true
                 recorder.requestPermissionAndStart()
                 Haptics.impact(.heavy)
@@ -464,7 +465,7 @@ struct RecorderView: View {
                         Button {
                             previewPlayer.pause()
                             trimStart = 0
-                            trimEnd = max(recorder.elapsed, 0.1)
+                            trimEnd = max(previewPlayer.duration, recorder.elapsed, 0.1)
                         } label: {
                             Label("Reset", systemImage: "arrow.counterclockwise")
                         }
@@ -554,9 +555,11 @@ struct RecorderView: View {
     @MainActor
     private func prepareRecordingPreview() {
         guard let url = recorder.temporaryURL else { return }
-        trimStart = 0
-        trimEnd = max(recorder.elapsed, 0.1)
         previewPlayer.load(url: url)
+        trimStart = 0
+        // Use the finished M4A duration as the primary trim boundary. This prevents
+        // an accidental ~0.1 s auto-trim even if a recorder timing callback is late.
+        trimEnd = max(previewPlayer.duration, recorder.elapsed, 0.1)
         Task {
             do { previewSamples = try await WaveformAnalyzer.shared.samples(for: url, count: 90) }
             catch { DebugLogger.shared.log("Recorder-Vorschau Waveform: \(error.localizedDescription)") }

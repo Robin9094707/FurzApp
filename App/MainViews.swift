@@ -17,6 +17,7 @@ struct MainTabView: View {
     var body: some View {
         TabView(selection: $selectedTab) {
             DashboardView(showRecorder: $showRecorder, showImporter: $showImporter) {
+                QuickRecordRequest.markRequested()
                 autoStartRecorder = true
                 showRecorder = true
                 Haptics.impact(.heavy)
@@ -78,6 +79,7 @@ struct MainTabView: View {
         .onChange(of: allEntries.count) { _, _ in refreshSharedState() }
         .onOpenURL { url in
             guard url.scheme?.lowercased() == "rjfurz", url.host?.lowercased() == "record" else { return }
+            QuickRecordRequest.markRequested()
             autoStartRecorder = true
             showRecorder = true
             Haptics.impact(.heavy)
@@ -91,7 +93,10 @@ struct MainTabView: View {
             await NotificationManager.shared.refreshInactivity(reminders: allReminders, entries: allEntries)
             await PartnerAPI.shared.processRemoteCommands(lastFartAt: allEntries.map(\.eventDate).max())
         }
-        if QuickRecordRequest.consumeIfRecent() {
+        // Do not consume here: on a cold launch the sheet and its content can be
+        // created in different SwiftUI transactions. The RecorderView consumes the
+        // request only when it is actually visible, which makes cold widget launches reliable.
+        if QuickRecordRequest.hasRecent() {
             autoStartRecorder = true
             showRecorder = true
         }

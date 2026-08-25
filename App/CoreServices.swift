@@ -117,6 +117,7 @@ final class AudioRecorder: NSObject, ObservableObject, AVAudioRecorderDelegate {
     private(set) var temporaryURL: URL?
 
     func requestPermissionAndStart() {
+        guard !isRecording, temporaryURL == nil else { return }
         AVAudioSession.sharedInstance().requestRecordPermission { [weak self] granted in
             Task { @MainActor in
                 guard let self else { return }
@@ -166,13 +167,24 @@ final class AudioRecorder: NSObject, ObservableObject, AVAudioRecorderDelegate {
 
     func stop() {
         guard isRecording else { return }
+        let measuredDuration = max(recorder?.currentTime ?? 0, elapsed)
         recorder?.stop()
         timer?.invalidate()
         timer = nil
         isRecording = false
-        elapsed = recorder?.currentTime ?? elapsed
+
+        // AVAudioRecorder.currentTime may fall back to ~0 immediately after stop().
+        // Keep the pre-stop value and verify it against the finished audio container.
+        if let url = temporaryURL,
+           let verifiedDuration = try? AudioFileStore.audioDuration(at: url),
+           verifiedDuration > 0 {
+            elapsed = max(measuredDuration, verifiedDuration)
+        } else {
+            elapsed = measuredDuration
+        }
+
         try? AVAudioSession.sharedInstance().setActive(false, options: .notifyOthersOnDeactivation)
-        DebugLogger.shared.log("Audioaufnahme beendet")
+        DebugLogger.shared.log("Audioaufnahme beendet · Dauer \(String(format: "%.2f", elapsed)) s")
     }
 
     func cancelAndCleanup() {
