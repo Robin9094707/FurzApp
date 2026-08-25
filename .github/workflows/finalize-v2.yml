@@ -1,0 +1,269 @@
+name: Finalize RJ Furz-App v2
+
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: write
+
+env:
+  PART07_SHA: d9c3c9e67f71a3ba950fe481adb3228796aa3dc5
+  PART08_SHA: a8257e6e667996a2ddeae5b7161ae49b455a6a18
+  PART09_SHA: 1b22dc44518eb66d79b6d794bfe33f397ba478f2
+  PART10_SHA: 6b9cff9be8b5ca35da0c2939058b57c985c1d8a5
+  PART11_SHA: b6df0f861a80cc9e7415ae5c5c873e006f23071e
+  PART12_SHA: 531e1691acc5515cd501f1a967b6ad7a9d0bfd05
+  PART13_SHA: 1025587eee30b0847649904768551bf2a9bf9bdf
+  PART14_SHA: 298ef569290282d3c7a7739d055e1034fb3bf922
+
+jobs:
+  finalize:
+    runs-on: macos-26
+    timeout-minutes: 40
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Restore v2 source if bootstrap parts are present
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          if [ ! -s .bootstrap/part00 ]; then
+            echo "Readable v2 source already present; reconstruction not needed."
+            exit 0
+          fi
+
+          fetch_blob() {
+            local sha="$1"
+            local out="$2"
+            curl -fsSL \
+              -H "Accept: application/vnd.github+json" \
+              -H "Authorization: Bearer ${GH_TOKEN}" \
+              -H "X-GitHub-Api-Version: 2022-11-28" \
+              "https://api.github.com/repos/${GITHUB_REPOSITORY}/git/blobs/${sha}" > /tmp/blob.json
+            python3 - "$out" <<'PY'
+          import base64, json, pathlib, sys
+          d = json.loads(pathlib.Path('/tmp/blob.json').read_text())
+          pathlib.Path(sys.argv[1]).write_bytes(base64.b64decode(d['content']))
+          PY
+          }
+
+          mkdir -p .bootstrap
+          for n in 07 08 09 10 11 12 13 14; do
+            key="PART${n}_SHA"
+            fetch_blob "${!key}" ".bootstrap/part${n}"
+          done
+
+          python3 <<'PY'
+          from pathlib import Path
+          import base64, tarfile, zipfile, shutil
+          parts=[]
+          for i in range(15):
+              p=Path(f'.bootstrap/part{i:02d}')
+              if not p.exists() or p.stat().st_size == 0:
+                  raise SystemExit(f'missing {p}')
+              parts.append(p.read_bytes())
+          joined=b''.join(parts)
+          payload=base64.b64decode(b''.join(joined.split()), validate=True)
+          src=Path('/tmp/v2.payload'); src.write_bytes(payload)
+          out=Path('/tmp/v2.extract'); shutil.rmtree(out, ignore_errors=True); out.mkdir()
+          if tarfile.is_tarfile(src):
+              with tarfile.open(src,'r:*') as tf: tf.extractall(out, filter='data')
+          elif zipfile.is_zipfile(src):
+              with zipfile.ZipFile(src) as zf: zf.extractall(out)
+          else:
+              raise SystemExit('v2 payload is not a supported archive')
+          candidates=sorted(out.rglob('project.yml'), key=lambda p: len(p.parts))
+          if not candidates: raise SystemExit('project.yml missing')
+          Path('/tmp/v2root').write_text(str(candidates[0].parent))
+          PY
+
+          ROOT="$(cat /tmp/v2root)"
+          rsync -a --delete --exclude='.git' "$ROOT/" "$GITHUB_WORKSPACE/"
+
+      - name: Normalize final repository and workflow
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm -rf .bootstrap
+          rm -f .github/workflows/bootstrap-v2.yml .github/workflows/finalize-v2.yml
+          mkdir -p .github/workflows dist
+          rm -f dist/RJ-FurzApp-v2-unsigned.ipa dist/BUILD-FAILED.txt dist/BUILD-VERIFIED.txt
+          cat > .github/workflows/build-ios.yml <<'YAML'
+          name: Build RJ Furz-App v2 IPA
+
+          on:
+            workflow_dispatch:
+
+          permissions:
+            contents: read
+
+          jobs:
+            build:
+              name: Build unsigned iOS IPA
+              runs-on: macos-26
+              timeout-minutes: 30
+              steps:
+                - uses: actions/checkout@v4
+                - name: Select Xcode 26.5
+                  run: |
+                    sudo xcode-select -s /Applications/Xcode_26.5.app/Contents/Developer
+                    xcodebuild -version
+                - name: Install XcodeGen
+                  run: brew install xcodegen
+                - name: Validate and generate project
+                  run: |
+                    set -euo pipefail
+                    find . -name '*.plist' -not -path './.git/*' -print0 | xargs -0 -n1 plutil -lint
+                    PYFILES="$(find . -name '*.py' -not -path './.git/*' -print)"
+                    if [ -n "$PYFILES" ]; then python3 -m py_compile $PYFILES; fi
+                    xcodegen generate --spec project.yml
+                - name: Build unsigned app
+                  run: |
+                    set -o pipefail
+                    xcodebuild -project RJFurzApp.xcodeproj -scheme RJFurzApp -configuration Release -sdk iphoneos -destination 'generic/platform=iOS' -derivedDataPath "$PWD/.github-derived" CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO CODE_SIGN_IDENTITY="" build 2>&1 | tee RJ-FurzApp-v2-build.log
+                - name: Package and verify IPA
+                  run: |
+                    set -euo pipefail
+                    APP="$(find "$PWD/.github-derived/Build/Products/Release-iphoneos" -maxdepth 1 -name '*.app' -type d -print -quit)"
+                    test -n "$APP"
+                    find "$APP" -maxdepth 4 -type d -name '*.appex' -print | tee /tmp/appex.txt
+                    test -s /tmp/appex.txt
+                    rm -rf Payload && mkdir Payload && cp -R "$APP" Payload/
+                    zip -qry RJ-FurzApp-v2-unsigned.ipa Payload
+                    unzip -t RJ-FurzApp-v2-unsigned.ipa
+                - uses: actions/upload-artifact@v4
+                  with:
+                    name: RJ-FurzApp-v2-unsigned-IPA
+                    path: RJ-FurzApp-v2-unsigned.ipa
+                    retention-days: 7
+                    compression-level: 0
+                - if: failure()
+                  uses: actions/upload-artifact@v4
+                  with:
+                    name: RJ-FurzApp-v2-build-log
+                    path: RJ-FurzApp-v2-build.log
+                    if-no-files-found: ignore
+                    retention-days: 7
+          YAML
+
+      - name: Validate project files
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -f project.yml
+          test -d App
+          grep -Rqs 'FartGeofence' App
+          find . -name '*.plist' -not -path './.git/*' -print0 | xargs -0 -n1 plutil -lint
+          PYFILES="$(find . -name '*.py' -not -path './.git/*' -print)"
+          if [ -n "$PYFILES" ]; then python3 -m py_compile $PYFILES; fi
+
+      - name: Select Xcode 26.5 and install XcodeGen
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo xcode-select -s /Applications/Xcode_26.5.app/Contents/Developer
+          xcodebuild -version
+          brew install xcodegen
+          xcodegen --version
+          xcodegen generate --spec project.yml
+
+      - name: Build unsigned app
+        id: build
+        shell: bash
+        run: |
+          set -o pipefail
+          rm -rf .github-derived
+          xcodebuild \
+            -project RJFurzApp.xcodeproj \
+            -scheme RJFurzApp \
+            -configuration Release \
+            -sdk iphoneos \
+            -destination 'generic/platform=iOS' \
+            -derivedDataPath "$PWD/.github-derived" \
+            CODE_SIGNING_ALLOWED=NO \
+            CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGN_IDENTITY="" \
+            build 2>&1 | tee RJ-FurzApp-v2-build.log
+
+      - name: Package IPA and verify widget extension
+        if: success()
+        shell: bash
+        run: |
+          set -euo pipefail
+          APP="$(find "$PWD/.github-derived/Build/Products/Release-iphoneos" -maxdepth 1 -name '*.app' -type d -print -quit)"
+          test -n "$APP"
+          find "$APP" -maxdepth 4 -type d -name '*.appex' -print | tee /tmp/appex.txt
+          test -s /tmp/appex.txt
+          rm -rf Payload
+          mkdir -p Payload
+          cp -R "$APP" Payload/
+          zip -qry RJ-FurzApp-v2-unsigned.ipa Payload
+          unzip -t RJ-FurzApp-v2-unsigned.ipa
+          cp RJ-FurzApp-v2-unsigned.ipa dist/RJ-FurzApp-v2-unsigned.ipa
+          {
+            echo '# RJ Furz-App v2 — Build verified'
+            echo
+            echo "Commit source: ${GITHUB_SHA}"
+            echo
+            xcodebuild -version
+            echo
+            echo 'Embedded extensions:'
+            sed 's/^/- /' /tmp/appex.txt
+          } > dist/BUILD-VERIFIED.txt
+
+      - name: Save concise compiler failure report
+        if: failure()
+        shell: bash
+        run: |
+          mkdir -p dist
+          {
+            echo '# RJ Furz-App v2 — Xcode build failed'
+            echo
+            xcodebuild -version 2>/dev/null || true
+            echo
+            echo 'Relevant compiler diagnostics:'
+            if [ -f RJ-FurzApp-v2-build.log ]; then
+              grep -E '(^|[[:space:]])(error:|warning:)|SwiftCompile|CompileSwift' RJ-FurzApp-v2-build.log | tail -n 350 || true
+            else
+              echo 'Build log was not created.'
+            fi
+          } > dist/BUILD-FAILED.txt
+
+      - name: Commit final readable source and build result
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          rm -f .github/workflows/bootstrap-v2.yml .github/workflows/finalize-v2.yml
+          git add -A
+          if ! git diff --cached --quiet; then
+            git commit -m 'Finalize RJ Furz-App v2 source and build result [skip ci]'
+            git push origin HEAD:main
+          fi
+
+      - name: Upload IPA artifact
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: RJ-FurzApp-v2-unsigned-IPA
+          path: RJ-FurzApp-v2-unsigned.ipa
+          if-no-files-found: error
+          retention-days: 7
+          compression-level: 0
+
+      - name: Upload full build log on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: RJ-FurzApp-v2-build-log
+          path: RJ-FurzApp-v2-build.log
+          if-no-files-found: ignore
+          retention-days: 7
