@@ -108,13 +108,13 @@ public enum QuickRecordRequest {
     public static let key = "quickRecord.requestedAt"
 
     public static func markRequested() {
-        UserDefaults.standard.set(Date().timeIntervalSince1970, forKey: key)
+        RJFurzShared.defaults.set(Date().timeIntervalSince1970, forKey: key)
     }
 
     public static func consumeIfRecent(maxAge: TimeInterval = 30) -> Bool {
-        let value = UserDefaults.standard.double(forKey: key)
+        let value = RJFurzShared.defaults.double(forKey: key)
         guard value > 0 else { return false }
-        UserDefaults.standard.removeObject(forKey: key)
+        RJFurzShared.defaults.removeObject(forKey: key)
         return Date().timeIntervalSince1970 - value <= maxAge
     }
 }

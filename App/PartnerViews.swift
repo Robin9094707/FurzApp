@@ -11,6 +11,7 @@ struct PartnerHubView: View {
     @AppStorage(PartnerAPI.shareLocationKey) private var shareLocation = false
     @AppStorage(PartnerAPI.shareBatteryKey) private var shareBattery = false
     @AppStorage(PartnerAPI.shareAudioKey) private var shareAudio = false
+    @AppStorage("partner.autoShareFarts") private var autoShareFarts = true
 
     @State private var password = ""
     @State private var friends: [PartnerFriend] = []
@@ -72,6 +73,7 @@ struct PartnerHubView: View {
                     Toggle("Meinen Akkustand teilen", isOn: $shareBattery)
                         .onChange(of: shareBattery) { _, _ in refreshPresence() }
                     Toggle("Audio bei geteilten Fürzen hochladen", isOn: $shareAudio)
+                    Toggle("Neue Fürze standardmäßig teilen", isOn: $autoShareFarts)
                     if shareLocation {
                         Label("Hintergrund-Standort benötigt „Immer erlauben“.", systemImage: "location.fill")
                             .font(.footnote)

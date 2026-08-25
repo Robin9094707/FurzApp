@@ -26,8 +26,8 @@ struct MainTabView: View {
                 .tabItem { Label("Archiv", systemImage: "waveform.badge.magnifyingglass") }
                 .tag(1)
 
-            FartCalendarView()
-                .tabItem { Label("Kalender", systemImage: "calendar") }
+            FriendsHomeView()
+                .tabItem { Label("Freunde", systemImage: "person.2.fill") }
                 .tag(2)
 
             StatsView()
@@ -91,6 +91,12 @@ struct MainTabView: View {
             if phase == .active { refreshSharedState() }
         }
         .onChange(of: allEntries.count) { _, _ in refreshSharedState() }
+        .onOpenURL { url in
+            guard url.scheme?.lowercased() == "rjfurz", url.host?.lowercased() == "record" else { return }
+            autoStartRecorder = true
+            showRecorder = true
+            Haptics.impact(.heavy)
+        }
     }
 
     private func refreshSharedState() {
@@ -225,6 +231,16 @@ struct DashboardView: View {
                         .padding(.vertical, 12)
                 }
                 .buttonStyle(.borderedProminent)
+
+                NavigationLink {
+                    FartCalendarView()
+                } label: {
+                    Label("Furz-Kalender öffnen", systemImage: "calendar")
+                        .font(.headline)
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 10)
+                }
+                .buttonStyle(.bordered)
             }
         }
     }

@@ -50,7 +50,9 @@ struct FartEditorView: View {
         _tagsText = State(initialValue: entry?.tags.joined(separator: ", ") ?? "")
         _folderID = State(initialValue: entry?.folderID)
         _isFavorite = State(initialValue: entry?.isFavorite ?? false)
-        _isShared = State(initialValue: entry?.isShared ?? false)
+        let autoShare = UserDefaults.standard.object(forKey: "partner.autoShareFarts") as? Bool ?? true
+        let partnerIsEnabled = UserDefaults.standard.bool(forKey: "partner.enabled")
+        _isShared = State(initialValue: entry?.isShared ?? (autoShare && partnerIsEnabled))
         _latitude = State(initialValue: entry?.latitude)
         _longitude = State(initialValue: entry?.longitude)
         _resolvedAddress = State(initialValue: entry?.resolvedAddress ?? "")
@@ -282,7 +284,7 @@ struct RecorderView: View {
     @State private var notes = ""
     @State private var tagsText = ""
     @State private var isFavorite = false
-    @State private var isShared = false
+    @State private var isShared = (UserDefaults.standard.object(forKey: "partner.autoShareFarts") as? Bool ?? true) && UserDefaults.standard.bool(forKey: "partner.enabled")
     @State private var latitude: Double?
     @State private var longitude: Double?
     @State private var resolvedAddress = ""
