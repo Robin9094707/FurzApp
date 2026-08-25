@@ -2,8 +2,6 @@ name: Build RJ Furz-App IPA
 
 on:
   workflow_dispatch:
-  push:
-    branches: [main]
 
 permissions:
   contents: read
