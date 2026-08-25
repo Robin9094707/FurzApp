@@ -1,4 +1,4 @@
-name: Build RJ Furz-App IPA
+name: Build RJ Furz-App v2 IPA
 
 on:
   workflow_dispatch:
@@ -8,9 +8,9 @@ permissions:
 
 jobs:
   build:
-    name: Build unsigned iOS IPA
+    name: Build verified unsigned iOS v2 IPA
     runs-on: macos-26
-    timeout-minutes: 30
+    timeout-minutes: 35
 
     steps:
       - name: Checkout
@@ -24,34 +24,35 @@ jobs:
           xcodebuild -version
           xcrun --sdk iphoneos --show-sdk-path
 
+      - name: Validate source and backend
+        shell: bash
+        run: |
+          set -euo pipefail
+          plutil -lint App/Info.plist
+          plutil -lint Widget/Info.plist
+          plutil -lint App/RJFurzApp.entitlements
+          plutil -lint Widget/RJFurzWidget.entitlements
+          test -f Widget/RJFurzWidgets.swift
+          test -f App/AlarmService.swift
+          test -f App/LocationViews.swift
+          test -f App/PartnerViews.swift
+          test -f App/Resources/Assets.xcassets/AppIcon.appiconset/AppIcon-1024.png
+          python3 -m py_compile Backend/rj_furz_backend.py
+          rm -rf Backend/__pycache__
+
       - name: Install XcodeGen
         shell: bash
         run: |
           set -euo pipefail
           brew install xcodegen
           xcodegen --version
-
-      - name: Generate Xcode project
-        shell: bash
-        run: |
-          set -euo pipefail
           xcodegen generate --spec project.yml
 
-      - name: Validate project files
-        shell: bash
-        run: |
-          set -euo pipefail
-          plutil -lint App/Info.plist
-          test -f App/Resources/Assets.xcassets/AppIcon.appiconset/AppIcon-1024.png
-          find App -name '*.swift' | sort
-
-      - name: Build unsigned app
-        id: build
+      - name: Build unsigned app and widget
         shell: bash
         run: |
           set -o pipefail
-          rm -rf .github-derived
-
+          rm -rf .github-derived RJ-FurzApp-v2-build.log
           xcodebuild \
             -project RJFurzApp.xcodeproj \
             -scheme RJFurzApp \
@@ -62,32 +63,35 @@ jobs:
             CODE_SIGNING_ALLOWED=NO \
             CODE_SIGNING_REQUIRED=NO \
             CODE_SIGN_IDENTITY="" \
-            build 2>&1 | tee RJ-FurzApp-build.log
+            build 2>&1 | tee RJ-FurzApp-v2-build.log
 
-      - name: Create unsigned IPA
+      - name: Create and verify unsigned v2 IPA
         if: success()
         shell: bash
         run: |
           set -euo pipefail
-
-          APP="$(find "$PWD/.github-derived/Build/Products/Release-iphoneos" \
-            -maxdepth 1 -name '*.app' -type d -print -quit)"
+          APP="$(find "$PWD/.github-derived/Build/Products/Release-iphoneos" -maxdepth 1 -name '*.app' -type d -print -quit)"
           test -n "$APP"
+          test -d "$APP/PlugIns"
+          APPEX_COUNT="$(find "$APP/PlugIns" -maxdepth 1 -name '*.appex' -type d | wc -l | tr -d ' ')"
+          test "$APPEX_COUNT" -ge 1
+          echo "Embedded widget extensions: $APPEX_COUNT"
+          find "$APP/PlugIns" -maxdepth 1 -name '*.appex' -type d -print
 
           rm -rf Payload
-          mkdir -p Payload
+          mkdir Payload
           cp -R "$APP" Payload/
+          /usr/bin/zip -qry RJ-FurzApp-v2-unsigned.ipa Payload
+          unzip -t RJ-FurzApp-v2-unsigned.ipa
+          unzip -l RJ-FurzApp-v2-unsigned.ipa | grep -E 'PlugIns/.+\.appex/' | head
+          shasum -a 256 RJ-FurzApp-v2-unsigned.ipa
 
-          /usr/bin/zip -qry RJ-FurzApp-unsigned.ipa Payload
-          unzip -t RJ-FurzApp-unsigned.ipa
-          ls -lh RJ-FurzApp-unsigned.ipa
-
-      - name: Upload IPA
+      - name: Upload v2 IPA
         if: success()
         uses: actions/upload-artifact@v4
         with:
-          name: RJ-FurzApp-unsigned-IPA
-          path: RJ-FurzApp-unsigned.ipa
+          name: RJ-FurzApp-v2-unsigned-IPA
+          path: RJ-FurzApp-v2-unsigned.ipa
           if-no-files-found: error
           retention-days: 7
           compression-level: 0
@@ -96,7 +100,7 @@ jobs:
         if: failure()
         uses: actions/upload-artifact@v4
         with:
-          name: RJ-FurzApp-build-log
-          path: RJ-FurzApp-build.log
+          name: RJ-FurzApp-v2-build-log
+          path: RJ-FurzApp-v2-build.log
           if-no-files-found: ignore
           retention-days: 7
