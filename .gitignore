@@ -1,0 +1,9 @@
+.DS_Store
+*.xcuserstate
+xcuserdata/
+DerivedData/
+.github-derived/
+Payload/
+*.ipa
+*.log
+RJFurzApp.xcodeproj/
