@@ -1,9 +1,11 @@
 .DS_Store
-*.xcuserstate
-xcuserdata/
 DerivedData/
 .github-derived/
 Payload/
 *.ipa
-*.log
-RJFurzApp.xcodeproj/
+*.xcuserstate
+xcuserdata/
+Backend/furz_backend_config.json
+Backend/furz_data/
+Backend/__pycache__/
+*.pyc
