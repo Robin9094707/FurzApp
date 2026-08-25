@@ -1,4 +1,4 @@
-name: Build RJ Furz-App 2.2 IPA
+name: Build RJ Furz-App 2.2.1 IPA
 
 on:
   workflow_dispatch:
@@ -8,7 +8,7 @@ permissions:
 
 jobs:
   build:
-    name: Build verified unsigned iOS 2.2 IPA
+    name: Build verified unsigned iOS 2.2.1 IPA
     runs-on: macos-26
     timeout-minutes: 35
 
@@ -24,7 +24,7 @@ jobs:
           xcodebuild -version
           xcrun --sdk iphoneos --show-sdk-path
 
-      - name: Validate 2.2 app source
+      - name: Validate 2.2.1 app source
         shell: bash
         run: |
           set -euo pipefail
@@ -36,7 +36,9 @@ jobs:
           grep -q 'Label("Freunde"' App/MainViews.swift
           grep -q 'counter.v3' Widget/RJFurzWidgets.swift
           grep -q 'OpenQuickFartRecorderIntent' Widget/RJFurzWidgets.swift
-          grep -q 'MARKETING_VERSION: "2.2"' project.yml
+          grep -q 'MARKETING_VERSION: "2.2.1"' project.yml
+          grep -q 'measuredDuration' App/CoreServices.swift
+          grep -q 'QuickRecordRequest.consumeIfRecent' App/EditorRecorderViews.swift
           python3 -m py_compile Backend/rj_furz_backend.py
           rm -rf Backend/__pycache__
 
@@ -52,7 +54,7 @@ jobs:
         shell: bash
         run: |
           set -o pipefail
-          rm -rf .github-derived RJ-FurzApp-2.2-build.log
+          rm -rf .github-derived RJ-FurzApp-2.2.1-build.log
           xcodebuild \
             -project RJFurzApp.xcodeproj \
             -scheme RJFurzApp \
@@ -63,9 +65,9 @@ jobs:
             CODE_SIGNING_ALLOWED=NO \
             CODE_SIGNING_REQUIRED=NO \
             CODE_SIGN_IDENTITY="" \
-            build 2>&1 | tee RJ-FurzApp-2.2-build.log
+            build 2>&1 | tee RJ-FurzApp-2.2.1-build.log
 
-      - name: Create and verify unsigned 2.2 IPA
+      - name: Create and verify unsigned 2.2.1 IPA
         if: success()
         shell: bash
         run: |
@@ -82,17 +84,17 @@ jobs:
           rm -rf Payload
           mkdir Payload
           cp -R "$APP" Payload/
-          /usr/bin/zip -qry RJ-FurzApp-2.2-unsigned.ipa Payload
-          unzip -t RJ-FurzApp-2.2-unsigned.ipa
-          unzip -l RJ-FurzApp-2.2-unsigned.ipa | grep -E 'PlugIns/.+\.appex/' | head
-          shasum -a 256 RJ-FurzApp-2.2-unsigned.ipa
+          /usr/bin/zip -qry RJ-FurzApp-2.2.1-unsigned.ipa Payload
+          unzip -t RJ-FurzApp-2.2.1-unsigned.ipa
+          unzip -l RJ-FurzApp-2.2.1-unsigned.ipa | grep -E 'PlugIns/.+\.appex/' | head
+          shasum -a 256 RJ-FurzApp-2.2.1-unsigned.ipa
 
-      - name: Upload 2.2 IPA
+      - name: Upload 2.2.1 IPA
         if: success()
         uses: actions/upload-artifact@v4
         with:
-          name: RJ-FurzApp-2.2-unsigned-IPA
-          path: RJ-FurzApp-2.2-unsigned.ipa
+          name: RJ-FurzApp-2.2.1-unsigned-IPA
+          path: RJ-FurzApp-2.2.1-unsigned.ipa
           if-no-files-found: error
           retention-days: 7
           compression-level: 0
@@ -101,7 +103,7 @@ jobs:
         if: failure()
         uses: actions/upload-artifact@v4
         with:
-          name: RJ-FurzApp-2.2-build-log
-          path: RJ-FurzApp-2.2-build.log
+          name: RJ-FurzApp-2.2.1-build-log
+          path: RJ-FurzApp-2.2.1-build.log
           if-no-files-found: ignore
           retention-days: 7
