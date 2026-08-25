@@ -1,0 +1,7 @@
+# RJ Furz-App v2 — Xcode build failed
+
+Xcode 26.6
+Build version 17F113
+
+Relevant compiler diagnostics:
+Build log was not created.
