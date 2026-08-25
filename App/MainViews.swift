@@ -4,11 +4,17 @@ import UniformTypeIdentifiers
 import Charts
 
 struct MainTabView: View {
+    @Environment(\.scenePhase) private var scenePhase
+    @Query private var allEntries: [FartEntry]
+    @Query private var allReminders: [FartReminder]
     @State private var selectedTab = 0
     @State private var showRecorder = false
     @State private var showImporter = false
     @State private var importedAudio: ImportedAudio?
     @State private var importError: String?
+    @State private var autoStartRecorder = false
+    @State private var pendingPartnerNudge: PartnerNudge?
+    @State private var partnerNudgeError: String?
 
     var body: some View {
         TabView(selection: $selectedTab) {
@@ -32,8 +38,8 @@ struct MainTabView: View {
                 .tabItem { Label("Mehr", systemImage: "gearshape") }
                 .tag(4)
         }
-        .sheet(isPresented: $showRecorder) {
-            RecorderView()
+        .sheet(isPresented: $showRecorder, onDismiss: { autoStartRecorder = false }) {
+            RecorderView(autoStart: autoStartRecorder)
         }
         .fileImporter(
             isPresented: $showImporter,
@@ -62,6 +68,65 @@ struct MainTabView: View {
             Button("OK", role: .cancel) { importError = nil }
         } message: {
             Text(importError ?? "Unbekannter Fehler")
+        }
+        .alert("Dein Furzfreund denkt an dich 💨", isPresented: Binding(
+            get: { pendingPartnerNudge != nil },
+            set: { if !$0 { pendingPartnerNudge = nil } }
+        )) {
+            Button("Wecker in 1 Minute") {
+                if let nudge = pendingPartnerNudge { Task { await respondToPartnerNudge(nudge, accept: true) } }
+            }
+            Button("Nicht jetzt", role: .cancel) {
+                if let nudge = pendingPartnerNudge { Task { await respondToPartnerNudge(nudge, accept: false) } }
+            }
+        } message: {
+            Text(pendingPartnerNudge.map { "@\($0.from): \($0.message)\n\nErst deine Bestätigung legt lokal einen Alarm an." } ?? "")
+        }
+        .alert("Furzfreunde-Fehler", isPresented: Binding(
+            get: { partnerNudgeError != nil },
+            set: { if !$0 { partnerNudgeError = nil } }
+        )) { Button("OK") { partnerNudgeError = nil } } message: { Text(partnerNudgeError ?? "") }
+        .onAppear { refreshSharedState() }
+        .onChange(of: scenePhase) { _, phase in
+            if phase == .active { refreshSharedState() }
+        }
+        .onChange(of: allEntries.count) { _, _ in refreshSharedState() }
+    }
+
+    private func refreshSharedState() {
+        WidgetSnapshotUpdater.refresh(entries: allEntries)
+        PartnerPresenceCoordinator.shared.configure(entries: allEntries)
+        Task {
+            await NotificationManager.shared.refreshInactivity(reminders: allReminders, entries: allEntries)
+            await checkPartnerNudges()
+        }
+        if QuickRecordRequest.consumeIfRecent() {
+            autoStartRecorder = true
+            showRecorder = true
+        }
+    }
+
+    @MainActor
+    private func checkPartnerNudges() async {
+        guard UserDefaults.standard.bool(forKey: PartnerAPI.enabledKey), PartnerAPI.shared.isConnected, pendingPartnerNudge == nil else { return }
+        do {
+            pendingPartnerNudge = try await PartnerAPI.shared.nudges().first(where: { $0.status == "pending" })
+        } catch {
+            DebugLogger.shared.log("Nudge-Abruf fehlgeschlagen: \(error.localizedDescription)")
+        }
+    }
+
+    @MainActor
+    private func respondToPartnerNudge(_ nudge: PartnerNudge, accept: Bool) async {
+        do {
+            try await PartnerAPI.shared.respondToNudge(id: nudge.id, accept: accept)
+            if accept {
+                try await FartAlarmKitService.schedulePartnerNudge(title: "@\(nudge.from): \(nudge.message)")
+                Haptics.success()
+            }
+            pendingPartnerNudge = nil
+        } catch {
+            partnerNudgeError = error.localizedDescription
         }
     }
 }

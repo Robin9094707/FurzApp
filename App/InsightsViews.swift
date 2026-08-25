@@ -159,6 +159,25 @@ struct StatsView: View {
                             }
                         }
 
+                        NavigationLink {
+                            FartHeatmapView()
+                        } label: {
+                            GlassCard {
+                                HStack {
+                                    VStack(alignment: .leading, spacing: 5) {
+                                        Text("Karte & Furz-Heatmap").font(.headline)
+                                        Text("Sieh, wo deine größten Windzonen liegen.")
+                                            .font(.subheadline)
+                                            .foregroundStyle(.secondary)
+                                    }
+                                    Spacer()
+                                    Image(systemName: "map.fill").font(.title2).foregroundStyle(.tint)
+                                    Image(systemName: "chevron.right").foregroundStyle(.secondary)
+                                }
+                            }
+                        }
+                        .buttonStyle(.plain)
+
                         GlassCard {
                             VStack(alignment: .leading, spacing: 12) {
                                 Text("Archiv-Fakten").font(.headline)
@@ -166,6 +185,8 @@ struct StatsView: View {
                                 statRow("Favoriten", "\(entries.filter(\.isFavorite).count)", "heart.fill")
                                 statRow("Mit Audio", "\(entries.filter { $0.audioFilename != nil }.count)", "waveform")
                                 statRow("Nukleare Fürze", "\(entries.filter { $0.loudness == .nuclear }.count)", "burst.fill")
+                                statRow("Furz-Score", "\(entries.reduce(0) { $0 + $1.fartScore })", "sparkles")
+                                statRow("Mit Standort", "\(entries.filter { $0.coordinate != nil }.count)", "mappin.and.ellipse")
                             }
                         }
                     }

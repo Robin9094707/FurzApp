@@ -435,6 +435,11 @@ struct ExportFart: Codable {
     let folderID: UUID?
     let favorite: Bool
     let audioFilename: String?
+    let latitude: Double?
+    let longitude: Double?
+    let resolvedAddress: String
+    let geofenceName: String
+    let sharedWithFriends: Bool
 }
 
 enum ExportService {
@@ -455,7 +460,12 @@ enum ExportService {
                 tags: $0.tags,
                 folderID: $0.folderID,
                 favorite: $0.isFavorite,
-                audioFilename: $0.audioFilename
+                audioFilename: $0.audioFilename,
+                latitude: $0.latitude,
+                longitude: $0.longitude,
+                resolvedAddress: $0.resolvedAddress,
+                geofenceName: $0.geofenceName,
+                sharedWithFriends: $0.isShared
             )
         }
         let encoder = JSONEncoder()

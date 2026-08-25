@@ -1,0 +1,11 @@
+{
+  "setup_complete": false,
+  "server_password": "WIRD-BEIM-ERSTEN-START-ZUFAELLIG-GENERIERT",
+  "bind_host": "0.0.0.0",
+  "port": 8788,
+  "data_directory": "furz_data",
+  "token_days": 90,
+  "max_audio_mb": 25,
+  "allow_account_creation": true,
+  "server_name": "Private RJ Furzfreunde"
+}

@@ -2,11 +2,16 @@ import SwiftUI
 import SwiftData
 import UniformTypeIdentifiers
 import Charts
+import CoreLocation
 
 struct FartEditorView: View {
     @Environment(\.dismiss) private var dismiss
     @Environment(\.modelContext) private var modelContext
     @Query(sort: \FartFolder.name) private var folders: [FartFolder]
+    @Query(sort: \FartGeofence.name) private var geofences: [FartGeofence]
+    @StateObject private var locationService = LocationService.shared
+    @AppStorage("location.captureEnabled") private var locationCaptureEnabled = false
+    @AppStorage("partner.enabled") private var partnerEnabled = false
 
     let entry: FartEntry?
     let newAudio: ImportedAudio?
@@ -22,6 +27,12 @@ struct FartEditorView: View {
     @State private var tagsText: String
     @State private var folderID: UUID?
     @State private var isFavorite: Bool
+    @State private var isShared: Bool
+    @State private var latitude: Double?
+    @State private var longitude: Double?
+    @State private var resolvedAddress: String
+    @State private var geofenceName: String
+    @State private var isResolvingLocation = false
     @State private var didSave = false
     @State private var samples: [CGFloat] = []
 
@@ -39,6 +50,11 @@ struct FartEditorView: View {
         _tagsText = State(initialValue: entry?.tags.joined(separator: ", ") ?? "")
         _folderID = State(initialValue: entry?.folderID)
         _isFavorite = State(initialValue: entry?.isFavorite ?? false)
+        _isShared = State(initialValue: entry?.isShared ?? false)
+        _latitude = State(initialValue: entry?.latitude)
+        _longitude = State(initialValue: entry?.longitude)
+        _resolvedAddress = State(initialValue: entry?.resolvedAddress ?? "")
+        _geofenceName = State(initialValue: entry?.geofenceName ?? "")
     }
 
     var body: some View {
@@ -68,6 +84,25 @@ struct FartEditorView: View {
                     RatingControl(title: "Geruchsintensität", value: $smellRating, symbol: "nose.fill")
                 }
 
+                Section("Ort") {
+                    Button {
+                        Task { await captureCurrentLocation() }
+                    } label: {
+                        Label(isResolvingLocation ? "Standort wird ermittelt …" : "Aktuellen Standort übernehmen", systemImage: "location.fill")
+                    }
+                    .disabled(isResolvingLocation)
+
+                    if !resolvedAddress.isEmpty {
+                        Label(resolvedAddress, systemImage: "map.fill")
+                            .font(.subheadline)
+                    }
+                    if !geofenceName.isEmpty {
+                        Label("Furz-Ort: \(geofenceName)", systemImage: "mappin.circle.fill")
+                            .foregroundStyle(.tint)
+                    }
+                    TextField("Ort manuell, z. B. Büro", text: $locationText)
+                }
+
                 Section("Einordnung") {
                     Picker("Ordner", selection: $folderID) {
                         Text("Kein Ordner").tag(UUID?.none)
@@ -75,9 +110,25 @@ struct FartEditorView: View {
                             Label(folder.name, systemImage: folder.symbol).tag(Optional(folder.id))
                         }
                     }
-                    TextField("Ort, z. B. Arbeit oder Zuhause", text: $locationText)
                     TextField("Situation, z. B. Sofa, Büro, Bus", text: $contextText)
+                    ScrollView(.horizontal, showsIndicators: false) {
+                        HStack {
+                            preset("Badezimmer vergast 🚽")
+                            preset("Auf Arbeit entwischt 💼")
+                            preset("Sofa-Orkan 🛋️")
+                            preset("Unterwegs erwischt 🚌")
+                        }
+                    }
                     TextField("Tags, mit Komma getrennt", text: $tagsText)
+                }
+
+                if partnerEnabled {
+                    Section("Furzfreunde") {
+                        Toggle("Diesen Furz mit Freunden teilen", isOn: $isShared)
+                        Text("Audio und Standort werden nur übertragen, wenn du die entsprechenden Freigaben in Furzfreunde aktiviert hast.")
+                            .font(.footnote)
+                            .foregroundStyle(.secondary)
+                    }
                 }
 
                 Section("Notizen") {
@@ -96,6 +147,11 @@ struct FartEditorView: View {
                         .disabled(title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
                 }
             }
+            .onAppear {
+                if entry == nil, locationCaptureEnabled, latitude == nil {
+                    Task { await captureCurrentLocation() }
+                }
+            }
             .onDisappear {
                 if !didSave, entry == nil, let filename = newAudio?.filename {
                     AudioFileStore.delete(filename: filename)
@@ -104,11 +160,38 @@ struct FartEditorView: View {
         }
     }
 
+    private func preset(_ text: String) -> some View {
+        Button(text) { contextText = text }
+            .buttonStyle(.bordered)
+            .font(.caption.bold())
+    }
+
+    @MainActor
+    private func captureCurrentLocation() async {
+        isResolvingLocation = true
+        locationService.requestCurrentLocation()
+        for _ in 0..<12 {
+            if let location = locationService.location,
+               Date().timeIntervalSince(location.timestamp) < 90 {
+                latitude = location.coordinate.latitude
+                longitude = location.coordinate.longitude
+                resolvedAddress = await AddressResolver.reverse(location)
+                geofenceName = GeofenceMatcher.name(for: location, geofences: geofences)
+                if locationText.isEmpty { locationText = geofenceName.isEmpty ? resolvedAddress : geofenceName }
+                isResolvingLocation = false
+                return
+            }
+            try? await Task.sleep(for: .milliseconds(200))
+        }
+        isResolvingLocation = false
+    }
+
     private func save() {
         let tags = tagsText.split(separator: ",")
             .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
             .filter { !$0.isEmpty }
 
+        let savedEntry: FartEntry
         if let entry {
             entry.title = title.trimmingCharacters(in: .whitespacesAndNewlines)
             entry.eventDate = eventDate
@@ -121,7 +204,13 @@ struct FartEditorView: View {
             entry.tags = tags
             entry.folderID = folderID
             entry.isFavorite = isFavorite
+            entry.latitude = latitude
+            entry.longitude = longitude
+            entry.resolvedAddress = resolvedAddress
+            entry.geofenceName = geofenceName
+            entry.isShared = isShared
             entry.updatedAt = .now
+            savedEntry = entry
         } else {
             let source: FartSource = newAudio == nil ? .manual : .imported
             let value = FartEntry(
@@ -138,14 +227,21 @@ struct FartEditorView: View {
                 notes: notes,
                 tags: tags,
                 folderID: folderID,
-                isFavorite: isFavorite
+                isFavorite: isFavorite,
+                latitude: latitude,
+                longitude: longitude,
+                resolvedAddress: resolvedAddress,
+                geofenceName: geofenceName,
+                isShared: isShared
             )
             modelContext.insert(value)
+            savedEntry = value
         }
         try? modelContext.save()
         didSave = true
         Haptics.success()
         DebugLogger.shared.log("Furz-Eintrag gespeichert: \(title)")
+        Task { await PartnerAPI.shared.upload(entry: savedEntry) }
         dismiss()
     }
 
@@ -167,7 +263,13 @@ struct RecorderView: View {
     @Environment(\.dismiss) private var dismiss
     @Environment(\.modelContext) private var modelContext
     @Query(sort: \FartFolder.name) private var folders: [FartFolder]
+    @Query(sort: \FartGeofence.name) private var geofences: [FartGeofence]
     @StateObject private var recorder = AudioRecorder()
+    @StateObject private var locationService = LocationService.shared
+    @AppStorage("location.captureEnabled") private var locationCaptureEnabled = false
+    @AppStorage("partner.enabled") private var partnerEnabled = false
+
+    let autoStart: Bool
 
     @State private var title = "Frischer Furz"
     @State private var eventDate = Date.now
@@ -180,9 +282,20 @@ struct RecorderView: View {
     @State private var notes = ""
     @State private var tagsText = ""
     @State private var isFavorite = false
+    @State private var isShared = false
+    @State private var latitude: Double?
+    @State private var longitude: Double?
+    @State private var resolvedAddress = ""
+    @State private var geofenceName = ""
+    @State private var isResolvingLocation = false
     @State private var confirmCancel = false
     @State private var saveError: String?
     @State private var didSave = false
+    @State private var didAutoStart = false
+
+    init(autoStart: Bool = false) {
+        self.autoStart = autoStart
+    }
 
     var body: some View {
         NavigationStack {
@@ -198,7 +311,7 @@ struct RecorderView: View {
                     .padding()
                 }
             }
-            .navigationTitle("Furz aufnehmen")
+            .navigationTitle(autoStart ? "Notfall-Furz 💨" : "Furz aufnehmen")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
@@ -225,6 +338,12 @@ struct RecorderView: View {
                 Button("OK", role: .cancel) { saveError = nil }
             } message: {
                 Text(saveError ?? recorder.errorMessage ?? "Unbekannter Fehler")
+            }
+            .onAppear {
+                guard autoStart, !didAutoStart else { return }
+                didAutoStart = true
+                recorder.requestPermissionAndStart()
+                Haptics.impact(.heavy)
             }
             .onDisappear {
                 if !didSave { recorder.cancelAndCleanup() }
@@ -265,6 +384,7 @@ struct RecorderView: View {
                     Button {
                         recorder.stop()
                         Haptics.success()
+                        if locationCaptureEnabled { Task { await captureCurrentLocation() } }
                     } label: {
                         Label("Aufnahme stoppen", systemImage: "stop.circle.fill")
                             .font(.headline)
@@ -316,18 +436,65 @@ struct RecorderView: View {
                         Label(folder.name, systemImage: folder.symbol).tag(Optional(folder.id))
                     }
                 }
+
+                Button { Task { await captureCurrentLocation() } } label: {
+                    Label(isResolvingLocation ? "Ort wird bestimmt …" : "Standort übernehmen", systemImage: "location.fill")
+                }
+                .disabled(isResolvingLocation)
+                if !resolvedAddress.isEmpty {
+                    Text(resolvedAddress).font(.footnote).foregroundStyle(.secondary)
+                }
+                if !geofenceName.isEmpty {
+                    Label(geofenceName, systemImage: "mappin.circle.fill").foregroundStyle(.tint)
+                }
                 TextField("Ort", text: $locationText)
                     .textFieldStyle(.roundedBorder)
                 TextField("Situation", text: $contextText)
                     .textFieldStyle(.roundedBorder)
+                ScrollView(.horizontal, showsIndicators: false) {
+                    HStack {
+                        preset("Badezimmer vergast 🚽")
+                        preset("Auf Arbeit entwischt 💼")
+                        preset("Sofa-Orkan 🛋️")
+                    }
+                }
                 TextField("Tags, z. B. Arbeit, episch", text: $tagsText)
                     .textFieldStyle(.roundedBorder)
                 TextField("Notiz", text: $notes, axis: .vertical)
                     .lineLimit(2...5)
                     .textFieldStyle(.roundedBorder)
                 Toggle("Als Favorit markieren", isOn: $isFavorite)
+                if partnerEnabled {
+                    Toggle("Mit Furzfreunden teilen", isOn: $isShared)
+                }
             }
         }
+    }
+
+    private func preset(_ text: String) -> some View {
+        Button(text) { contextText = text }
+            .buttonStyle(.bordered)
+            .font(.caption.bold())
+    }
+
+    @MainActor
+    private func captureCurrentLocation() async {
+        isResolvingLocation = true
+        locationService.requestCurrentLocation()
+        for _ in 0..<12 {
+            if let location = locationService.location,
+               Date().timeIntervalSince(location.timestamp) < 90 {
+                latitude = location.coordinate.latitude
+                longitude = location.coordinate.longitude
+                resolvedAddress = await AddressResolver.reverse(location)
+                geofenceName = GeofenceMatcher.name(for: location, geofences: geofences)
+                if locationText.isEmpty { locationText = geofenceName.isEmpty ? resolvedAddress : geofenceName }
+                isResolvingLocation = false
+                return
+            }
+            try? await Task.sleep(for: .milliseconds(200))
+        }
+        isResolvingLocation = false
     }
 
     private func saveRecording() {
@@ -351,13 +518,19 @@ struct RecorderView: View {
                 notes: notes,
                 tags: tags,
                 folderID: folderID,
-                isFavorite: isFavorite
+                isFavorite: isFavorite,
+                latitude: latitude,
+                longitude: longitude,
+                resolvedAddress: resolvedAddress,
+                geofenceName: geofenceName,
+                isShared: isShared
             )
             modelContext.insert(entry)
             try modelContext.save()
             didSave = true
             Haptics.success()
             DebugLogger.shared.log("Eigene Furz-Aufnahme als Eintrag gespeichert")
+            Task { await PartnerAPI.shared.upload(entry: entry) }
             dismiss()
         } catch {
             saveError = error.localizedDescription

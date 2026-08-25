@@ -1,64 +1,74 @@
-# Features — RJ Furz-App 1.0
+# RJ Furz-App 2.0 – Feature-Matrix
 
-## Aufnehmen & Audio
-- AVFoundation-Mikrofonaufnahme
-- AAC/M4A, 44,1 kHz, Mono, 128 kbit/s
-- Live-Pegelmeter/Wellenform
-- Player mit Scrubbing
-- variable Wiedergabegeschwindigkeit
-- Waveform-Analyse gespeicherter Dateien
-- trimmen und sicher ersetzen
-- Audio direkt teilen
+## Archiv & Audio
+- Aufnahme M4A / 44.1 kHz / AAC
+- Live-Pegel
+- Import von Audio-Dateien
+- Wellenform-Player, Scrubbing, Geschwindigkeit
+- Live-Zuschnitt: sichtbare Start-/Endlinien, Auswahl-Probehören, Abspielposition
+- sichere Export-/Replace-Strategie
+- Teilen von Audio
+- Favoriten, Ordner, Tags, Suche, Filter, Sortierung
 
-## Furz-Datensatz
-Jeder Eintrag kann enthalten:
-- Name
-- tatsächlicher Furz-Zeitpunkt
-- Quelle (aufgenommen / importiert / ohne Audio)
+## Furz-Metadaten
+- Datum/Uhrzeit
 - Lautstärke: Leise / Mittel / Laut / Nuklear
-- Geruchsintensität 1–5
+- Geruch 1–5
 - persönliche Bewertung 1–5
-- Dauer
-- Ort
-- Situation
-- Tags
-- Notizen
-- Ordner
-- Favorit
-- Info, ob das Audio zugeschnitten wurde
+- Dauer, Situation, Notizen
+- Furz-Score
+- optionale Koordinaten, Adresse und Geofence-Name
 
-## Archiv
-- SwiftData-Persistenz
-- Suche über Name, Notizen und Tags
-- Filter nach Ordner, Lautstärke und Favoriten
-- Sortierung nach Datum, Bewertung, Lautstärke oder Dauer
-- Swipe-Favorit
-- Löschbestätigung inklusive Audio
+## Widgets & Controls
+- WidgetKit Extension
+- kleines/mittleres/großes Furzzähler-Widget
+- 24 h / 7 d / 30 d / Woche / Gesamt
+- App-Standard für Widget-Zeitraum
+- 100 Sprüche
+- App Group für Zähler-Snapshot
+- AppIntent-Schnellaufnahme
+- Control-Center-Control
 
-## Kalender & Statistik
-- grafischer Kalender
-- Tagesliste
-- 14-Tage-Balkendiagramm
-- Lautstärke-Sector-Chart
-- Gesamtzahl, Durchschnittsbewertung, Audio-Dauer
-- Anzahl Favoriten, Audios und nuklearer Fürze
-- meistbenutzter Ordner
+## Orte
+- freiwillige When-In-Use-Ortung
+- freiwillige Always-/Background-Ortung ausschließlich für aktivierte Partnerfreigabe
+- Reverse-Geocoding
+- eigene Geofences
+- automatische Zuordnung zum nächstpassenden Furz-Ort
+- Kartenansicht pro Furz
+- lokale Raster-Heatmap mit variabler Punktgröße/-intensität
 
-## Furzwecker
-- lokale iOS-Benachrichtigungen
-- tägliche Wiederholung oder ausgewählte Wochentage
-- mehrere unabhängige Erinnerungen
-- aktivieren/deaktivieren
-- sichere Entfernung beim Löschen/Reset
+## Erinnerungen
+- AlarmKit echter Systemalarm
+- tägliche Wiederholung
+- frei gewählte Wochentage
+- normale lokale Benachrichtigung als Alternative
+- Windstille-/Inaktivitäts-Erinnerung
+- Partner-Anstupser nur nach Bestätigung
 
-## Daten & Qualität
-- JSON-Metadatenexport
-- kompletter Datenreset
-- Debug-Log
-- Liquid Glass
-- Light/Dark Mode
-- Dynamic Type
-- SF Symbols
-- Haptics
-- destruktive Aktionen mit Bestätigung
-- keine Drittanbieterbibliotheken
+## Furzfreunde
+- Backend standardmäßig aus
+- Domain oder IP:Port
+- serverweites Hauptpasswort + Benutzername
+- Sitzungstoken im iOS Keychain
+- Freundschaftsanfragen
+- Freunde entfernen mit Bestätigung
+- Konto löschen mit Bestätigung
+- gemeinsamer Feed
+- Audiofreigabe optional
+- Kommentare
+- Rangliste / Score / Geruchs- und Bewertungsdurchschnitt
+- Standortfreigabe optional
+- Akkufreigabe optional
+- letzter Furz / letzter Standortzeitpunkt
+- Furz-Anstupser mit Empfänger-Zustimmung
+
+## Python-Backend
+- FastAPI + Uvicorn
+- First-run config generator
+- lesbare JSON-Datenablage
+- Audio-Dateien separat
+- Token-Ablauf
+- Größenlimit für Uploads
+- keine öffentliche Fremdregistrierung ohne Hauptpasswort
+- Integration-Smoke-Test durchgeführt

@@ -10,7 +10,8 @@ struct RJFurzAppApp: App {
             let schema = Schema([
                 FartEntry.self,
                 FartFolder.self,
-                FartReminder.self
+                FartReminder.self,
+                FartGeofence.self
             ])
             let configuration = ModelConfiguration(schema: schema, isStoredInMemoryOnly: false)
             container = try ModelContainer(for: schema, configurations: [configuration])
