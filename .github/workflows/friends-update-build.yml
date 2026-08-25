@@ -1,0 +1,185 @@
+name: Build RJ Furz-App 2.1 Friends Update
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: macos-26
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Apply app-only friends and widget patches
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 <<'PY'
+          from pathlib import Path
+
+          def replace_once(path, old, new, label):
+              p = Path(path)
+              text = p.read_text()
+              if new in text:
+                  print(f'{label}: already applied')
+                  return
+              if old not in text:
+                  raise SystemExit(f'{label}: expected source block not found in {path}')
+              p.write_text(text.replace(old, new, 1))
+              print(f'{label}: applied')
+
+          replace_once(
+              'App/MainViews.swift',
+              '''            FartCalendarView()\n                .tabItem { Label("Kalender", systemImage: "calendar") }\n                .tag(2)\n\n            StatsView()\n                .tabItem { Label("Statistik", systemImage: "chart.xyaxis.line") }\n                .tag(3)\n\n            SettingsView()\n                .tabItem { Label("Mehr", systemImage: "gearshape") }\n                .tag(4)''',
+              '''            FriendsHomeView()\n                .tabItem { Label("Freunde", systemImage: "person.2.fill") }\n                .tag(2)\n\n            StatsView()\n                .tabItem { Label("Statistik", systemImage: "chart.xyaxis.line") }\n                .tag(3)\n\n            SettingsView()\n                .tabItem { Label("Mehr", systemImage: "gearshape") }\n                .tag(4)''',
+              'Direct Freunde tab'
+          )
+
+          replace_once(
+              'App/MainViews.swift',
+              '''        .onChange(of: allEntries.count) { _, _ in refreshSharedState() }\n    }''',
+              '''        .onChange(of: allEntries.count) { _, _ in refreshSharedState() }\n        .onOpenURL { url in\n            guard url.scheme?.lowercased() == "rjfurz", url.host?.lowercased() == "record" else { return }\n            autoStartRecorder = true\n            showRecorder = true\n            Haptics.impact(.heavy)\n        }\n    }''',
+              'Widget deep link handler'
+          )
+
+          replace_once(
+              'App/MainViews.swift',
+              '''                NavigationLink {\n                    ReminderListView()\n                } label: {\n                    Label("Furzwecker & Erinnerungen", systemImage: "alarm.fill")\n                        .font(.headline)\n                        .frame(maxWidth: .infinity)\n                        .padding(.vertical, 12)\n                }\n                .buttonStyle(.borderedProminent)''',
+              '''                NavigationLink {\n                    ReminderListView()\n                } label: {\n                    Label("Furzwecker & Erinnerungen", systemImage: "alarm.fill")\n                        .font(.headline)\n                        .frame(maxWidth: .infinity)\n                        .padding(.vertical, 12)\n                }\n                .buttonStyle(.borderedProminent)\n\n                NavigationLink {\n                    FartCalendarView()\n                } label: {\n                    Label("Furz-Kalender öffnen", systemImage: "calendar")\n                        .font(.headline)\n                        .frame(maxWidth: .infinity)\n                        .padding(.vertical, 10)\n                }\n                .buttonStyle(.bordered)''',
+              'Keep calendar accessible'
+          )
+
+          replace_once(
+              'Shared/RJFurzShared.swift',
+              '''    public static func markRequested() {\n        UserDefaults.standard.set(Date().timeIntervalSince1970, forKey: key)\n    }\n\n    public static func consumeIfRecent(maxAge: TimeInterval = 30) -> Bool {\n        let value = UserDefaults.standard.double(forKey: key)\n        guard value > 0 else { return false }\n        UserDefaults.standard.removeObject(forKey: key)\n        return Date().timeIntervalSince1970 - value <= maxAge\n    }''',
+              '''    public static func markRequested() {\n        RJFurzShared.defaults.set(Date().timeIntervalSince1970, forKey: key)\n    }\n\n    public static func consumeIfRecent(maxAge: TimeInterval = 30) -> Bool {\n        let value = RJFurzShared.defaults.double(forKey: key)\n        guard value > 0 else { return false }\n        RJFurzShared.defaults.removeObject(forKey: key)\n        return Date().timeIntervalSince1970 - value <= maxAge\n    }''',
+              'Shared quick-record request'
+          )
+
+          replace_once(
+              'App/EditorRecorderViews.swift',
+              '''        _isShared = State(initialValue: entry?.isShared ?? false)''',
+              '''        let autoShare = UserDefaults.standard.object(forKey: "partner.autoShareFarts") as? Bool ?? true\n        let partnerIsEnabled = UserDefaults.standard.bool(forKey: "partner.enabled")\n        _isShared = State(initialValue: entry?.isShared ?? (autoShare && partnerIsEnabled))''',
+              'Editor auto-share default'
+          )
+
+          replace_once(
+              'App/EditorRecorderViews.swift',
+              '''    @State private var isShared = false''',
+              '''    @State private var isShared = (UserDefaults.standard.object(forKey: "partner.autoShareFarts") as? Bool ?? true) && UserDefaults.standard.bool(forKey: "partner.enabled")''',
+              'Recorder auto-share default'
+          )
+
+          replace_once(
+              'App/PartnerViews.swift',
+              '''    @AppStorage(PartnerAPI.shareAudioKey) private var shareAudio = false''',
+              '''    @AppStorage(PartnerAPI.shareAudioKey) private var shareAudio = false\n    @AppStorage("partner.autoShareFarts") private var autoShareFarts = true''',
+              'Partner auto-share setting storage'
+          )
+
+          replace_once(
+              'App/PartnerViews.swift',
+              '''                    Toggle("Audio bei geteilten Fürzen hochladen", isOn: $shareAudio)\n                    if shareLocation {''',
+              '''                    Toggle("Audio bei geteilten Fürzen hochladen", isOn: $shareAudio)\n                    Toggle("Neue Fürze standardmäßig teilen", isOn: $autoShareFarts)\n                    if shareLocation {''',
+              'Partner auto-share toggle'
+          )
+          PY
+
+      - name: Commit readable source update
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add App/MainViews.swift App/EditorRecorderViews.swift App/PartnerViews.swift Shared/RJFurzShared.swift App/FriendsHomeView.swift Widget/RJFurzWidgets.swift project.yml
+          if ! git diff --cached --quiet; then
+            git commit -m 'Integrate premium Freunde tab and widget reliability fixes [skip ci]'
+            git push origin HEAD:main
+          fi
+
+      - name: Validate app source
+        shell: bash
+        run: |
+          set -euo pipefail
+          plutil -lint App/Info.plist
+          plutil -lint Widget/Info.plist
+          plutil -lint App/RJFurzApp.entitlements
+          plutil -lint Widget/RJFurzWidget.entitlements
+          grep -q 'Label("Freunde"' App/MainViews.swift
+          grep -q 'FriendsHomeView' App/FriendsHomeView.swift
+          grep -q 'partner.autoShareFarts' App/EditorRecorderViews.swift
+          grep -q 'RJFurzShared.defaults.set' Shared/RJFurzShared.swift
+          grep -q 'StaticConfiguration' Widget/RJFurzWidgets.swift
+
+      - name: Select Xcode 26.5 and generate project
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo xcode-select -s /Applications/Xcode_26.5.app/Contents/Developer
+          xcodebuild -version
+          brew install xcodegen
+          xcodegen --version
+          xcodegen generate --spec project.yml
+
+      - name: Build app and widget
+        shell: bash
+        run: |
+          set -o pipefail
+          rm -rf .github-derived RJ-FurzApp-2.1-build.log
+          xcodebuild \
+            -project RJFurzApp.xcodeproj \
+            -scheme RJFurzApp \
+            -configuration Release \
+            -sdk iphoneos \
+            -destination 'generic/platform=iOS' \
+            -derivedDataPath "$PWD/.github-derived" \
+            CODE_SIGNING_ALLOWED=NO \
+            CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGN_IDENTITY="" \
+            build 2>&1 | tee RJ-FurzApp-2.1-build.log
+
+      - name: Package and verify IPA
+        if: success()
+        shell: bash
+        run: |
+          set -euo pipefail
+          APP="$(find "$PWD/.github-derived/Build/Products/Release-iphoneos" -maxdepth 1 -name '*.app' -type d -print -quit)"
+          test -n "$APP"
+          test -d "$APP/PlugIns"
+          APPEX="$(find "$APP/PlugIns" -maxdepth 1 -name '*.appex' -type d -print -quit)"
+          test -n "$APPEX"
+          test -f "$APPEX/Info.plist"
+          test -d "$APPEX/Metadata.appintents"
+          rm -rf Payload
+          mkdir Payload
+          cp -R "$APP" Payload/
+          /usr/bin/zip -qry RJ-FurzApp-2.1-Friends-unsigned.ipa Payload
+          unzip -t RJ-FurzApp-2.1-Friends-unsigned.ipa
+          unzip -l RJ-FurzApp-2.1-Friends-unsigned.ipa | grep -E 'PlugIns/.+\.appex/' | head
+          shasum -a 256 RJ-FurzApp-2.1-Friends-unsigned.ipa
+
+      - name: Upload verified IPA
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: RJ-FurzApp-2.1-Friends-unsigned-IPA
+          path: RJ-FurzApp-2.1-Friends-unsigned.ipa
+          if-no-files-found: error
+          retention-days: 7
+          compression-level: 0
+
+      - name: Upload compiler log on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: RJ-FurzApp-2.1-build-log
+          path: RJ-FurzApp-2.1-build.log
+          if-no-files-found: ignore
+          retention-days: 7
