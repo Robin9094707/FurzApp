@@ -17,11 +17,20 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Reconstruct clean v2 source
+      - name: Preserve current workflow files
         shell: bash
         run: |
           set -euo pipefail
-          python3 <<'PY'
+          rm -rf /tmp/rj-workflows
+          mkdir -p /tmp/rj-workflows
+          cp -R .github/workflows/. /tmp/rj-workflows/
+
+      - name: Reconstruct clean v2 source when needed
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ -s .bootstrap/part00 ]; then
+            python3 <<'PY'
           from pathlib import Path
           import base64, hashlib, tarfile, shutil
 
@@ -51,11 +60,28 @@ jobs:
           Path('/tmp/rjfurz-v2-root').write_text(str(candidates[0].parent))
           PY
 
-          ROOT="$(cat /tmp/rjfurz-v2-root)"
-          rsync -a --delete --exclude='.git' "$ROOT/" "$GITHUB_WORKSPACE/"
-          rm -rf .bootstrap Backend/__pycache__ dist
-          echo "Restored source root: $ROOT"
-          find . -maxdepth 3 -type f | sort
+            ROOT="$(cat /tmp/rjfurz-v2-root)"
+            rsync -a --delete --exclude='.git' "$ROOT/" "$GITHUB_WORKSPACE/"
+            rm -rf .github/workflows
+            mkdir -p .github/workflows
+            cp -R /tmp/rj-workflows/. .github/workflows/
+            rm -rf .bootstrap Backend/__pycache__ dist
+            echo "Restored source root: $ROOT"
+          else
+            echo 'Clean v2 source already promoted; using repository source.'
+          fi
+
+          python3 <<'PY'
+          from pathlib import Path
+          p = Path('Shared/RJFurzShared.swift')
+          s = p.read_text()
+          obsolete = '    public static var allowedExecutionTargets: ExecutionTargets { .main }\n'
+          if obsolete in s:
+              p.write_text(s.replace(obsolete, ''))
+              print('Removed obsolete ExecutionTargets AppIntent declaration.')
+          else:
+              print('ExecutionTargets compatibility fix already present.')
+          PY
 
       - name: Validate source
         shell: bash
@@ -122,6 +148,7 @@ jobs:
           unzip -t RJ-FurzApp-v2-unsigned.ipa
           unzip -l RJ-FurzApp-v2-unsigned.ipa | grep -E 'PlugIns/.+\.appex/' | head
           mkdir -p dist
+          rm -f dist/BUILD-FAILED.txt
           cat > dist/BUILD-VERIFIED.txt <<EOF
           RJ Furz-App v2 build verified successfully.
           Widget extension embedded: yes ($APPEX_COUNT)
@@ -134,6 +161,7 @@ jobs:
         shell: bash
         run: |
           mkdir -p dist
+          rm -f dist/BUILD-VERIFIED.txt
           {
             echo 'RJ Furz-App v2 build failed.'
             xcodebuild -version 2>/dev/null || true
@@ -152,11 +180,11 @@ jobs:
           set -euo pipefail
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-          rm -f .github/workflows/finalize-v2-fixed.yml
           rm -rf .bootstrap Backend/__pycache__ Payload .github-derived
           git add -A
+          git reset -- RJFurzApp.xcodeproj RJ-FurzApp-v2-build.log RJ-FurzApp-v2-unsigned.ipa 2>/dev/null || true
           if ! git diff --cached --quiet; then
-            git commit -m 'Finalize clean RJ Furz-App v2 source [skip ci]'
+            git commit -m 'Promote clean RJ Furz-App v2 source and build result [skip ci]'
             git push origin HEAD:main
           fi
 
