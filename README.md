@@ -68,12 +68,12 @@ Für Internetzugriff: **HTTPS über Reverse Proxy** benutzen. Im privaten LAN ak
 ## Unsigned IPA mit GitHub Actions
 
 1. Repository öffnen.
-2. **Actions → Build RJ Furz-App IPA → Run workflow**.
-3. Artifact **RJ-FurzApp-unsigned-IPA** herunterladen.
-4. Darin liegt `RJ-FurzApp-unsigned.ipa`.
+2. **Actions → Build RJ Furz-App v2 IPA → Run workflow**.
+3. Artifact **RJ-FurzApp-v2-unsigned-IPA** herunterladen.
+4. Darin liegt `RJ-FurzApp-v2-unsigned.ipa`.
 5. Mit dem eigenen Signaturdienst signieren/installieren.
 
-Der Workflow nutzt `macos-26`, Xcode 26.5 und XcodeGen. Code Signing wird beim CI-Build deaktiviert.
+Der Workflow nutzt `macos-26`, Xcode 26.5 und XcodeGen. Code Signing wird beim CI-Build deaktiviert. Zusätzlich bricht der Workflow ab, falls die Widget-Extension nicht als `.appex` in die App eingebettet wurde.
 
 ### Wichtig für Widgets beim Sideloading
 
