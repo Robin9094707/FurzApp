@@ -26,7 +26,6 @@ jobs:
 
           python3 <<'PY'
           from pathlib import Path
-          # Generate a real 1024x1024 wind/puff app icon without third-party packages.
           W=H=1024
           pix=bytearray(W*H*3)
           def setp(x,y,c):
@@ -35,45 +34,24 @@ jobs:
           for y in range(H):
               for x in range(W):
                   t=(x+y)/(W+H-2)
-                  r=int(69+(153-69)*t); g=int(36+(66-36)*t); b=int(105+(181-105)*t)
-                  setp(x,y,(r,g,b))
+                  setp(x,y,(int(69+(153-69)*t),int(36+(66-36)*t),int(105+(181-105)*t)))
           def circle(cx,cy,r,c):
               rr=r*r
               for y in range(max(0,cy-r),min(H,cy+r+1)):
-                  dy=(y-cy)*(y-cy)
-                  span=int(max(0,rr-dy)**0.5)
+                  span=int(max(0,rr-(y-cy)*(y-cy))**0.5)
                   for x in range(max(0,cx-span),min(W,cx+span+1)): setp(x,y,c)
-          def rounded_line(x1,y1,x2,y2,w,c):
-              # horizontal rounded bar
-              for y in range(y1-w//2,y1+w//2+1):
-                  for x in range(x1,x2+1): setp(x,y,c)
-              circle(x1,y1,w//2,c); circle(x2,y2,w//2,c)
-          white=(255,249,241)
-          # Cute central puff / wind emoji-style mark.
+          def line(x1,y,x2,w,c):
+              for yy in range(y-w//2,y+w//2+1):
+                  for x in range(x1,x2+1): setp(x,yy,c)
+              circle(x1,y,w//2,c); circle(x2,y,w//2,c)
+          white=(255,249,241); accent=(111,45,166)
           circle(500,505,180,white); circle(405,455,125,white); circle(590,405,145,white); circle(660,520,125,white)
-          rounded_line(215,455,385,455,54,white)
-          rounded_line(180,565,400,565,54,white)
-          rounded_line(230,675,455,675,54,white)
-          # purple curved-looking accents represented by compact circles on top
-          accent=(111,45,166)
-          circle(535,445,38,accent); circle(620,395,31,accent)
-          # carve centers back to white for ring accents
-          circle(535,452,22,white); circle(620,402,18,white)
-          ppm=Path('/tmp/rj-wind-icon.ppm')
-          ppm.write_bytes(f'P6\n{W} {H}\n255\n'.encode()+pix)
+          line(215,455,385,54,white); line(180,565,400,54,white); line(230,675,455,54,white)
+          circle(535,445,38,accent); circle(620,395,31,accent); circle(535,452,22,white); circle(620,402,18,white)
+          Path('/tmp/rj-wind-icon.ppm').write_bytes(f'P6\n{W} {H}\n255\n'.encode()+pix)
           PY
           sips -s format png /tmp/rj-wind-icon.ppm --out App/Resources/Assets.xcassets/AppIcon.appiconset/AppIcon-1024.png >/dev/null
-
-          python3 <<'PY'
-          from pathlib import Path
-          p=Path('.github/workflows/build-ios.yml')
-          s=p.read_text()
-          s=s.replace('2.1', '2.2').replace('v2 IPA', '2.2 IPA').replace('v2-build', '2.2-build').replace('v2-unsigned', '2.2-unsigned')
-          p.write_text(s)
-          PY
-
-          rm -rf .update22 Backend/__pycache__
-          rm -f .github/workflows/apply-build-22.yml
+          rm -rf Backend/__pycache__
 
       - name: Validate complete source
         shell: bash
@@ -95,7 +73,8 @@ jobs:
           set -euo pipefail
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-          git add -A
+          git add project.yml Shared Widget App Backend
+          git rm -r .update22
           if ! git diff --cached --quiet; then
             git commit -m 'RJ Furz-App 2.2 widgets friends audio and recorder update [skip ci]'
             git push origin HEAD:main
