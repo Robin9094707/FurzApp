@@ -1,4 +1,4 @@
-name: Build RJ Furz-App v2 IPA
+name: Build RJ Furz-App 2.1 IPA
 
 on:
   workflow_dispatch:
@@ -8,7 +8,7 @@ permissions:
 
 jobs:
   build:
-    name: Build verified unsigned iOS v2 IPA
+    name: Build verified unsigned iOS 2.1 IPA
     runs-on: macos-26
     timeout-minutes: 35
 
@@ -24,7 +24,7 @@ jobs:
           xcodebuild -version
           xcrun --sdk iphoneos --show-sdk-path
 
-      - name: Validate source and backend
+      - name: Validate app source
         shell: bash
         run: |
           set -euo pipefail
@@ -33,10 +33,13 @@ jobs:
           plutil -lint App/RJFurzApp.entitlements
           plutil -lint Widget/RJFurzWidget.entitlements
           test -f Widget/RJFurzWidgets.swift
+          test -f App/FriendsHomeView.swift
+          test -f App/PartnerViews.swift
           test -f App/AlarmService.swift
           test -f App/LocationViews.swift
-          test -f App/PartnerViews.swift
           test -f App/Resources/Assets.xcassets/AppIcon.appiconset/AppIcon-1024.png
+          grep -q 'Label("Freunde"' App/MainViews.swift
+          grep -q 'StaticConfiguration' Widget/RJFurzWidgets.swift
           python3 -m py_compile Backend/rj_furz_backend.py
           rm -rf Backend/__pycache__
 
@@ -52,7 +55,7 @@ jobs:
         shell: bash
         run: |
           set -o pipefail
-          rm -rf .github-derived RJ-FurzApp-v2-build.log
+          rm -rf .github-derived RJ-FurzApp-2.1-build.log
           xcodebuild \
             -project RJFurzApp.xcodeproj \
             -scheme RJFurzApp \
@@ -63,9 +66,9 @@ jobs:
             CODE_SIGNING_ALLOWED=NO \
             CODE_SIGNING_REQUIRED=NO \
             CODE_SIGN_IDENTITY="" \
-            build 2>&1 | tee RJ-FurzApp-v2-build.log
+            build 2>&1 | tee RJ-FurzApp-2.1-build.log
 
-      - name: Create and verify unsigned v2 IPA
+      - name: Create and verify unsigned 2.1 IPA
         if: success()
         shell: bash
         run: |
@@ -73,25 +76,26 @@ jobs:
           APP="$(find "$PWD/.github-derived/Build/Products/Release-iphoneos" -maxdepth 1 -name '*.app' -type d -print -quit)"
           test -n "$APP"
           test -d "$APP/PlugIns"
-          APPEX_COUNT="$(find "$APP/PlugIns" -maxdepth 1 -name '*.appex' -type d | wc -l | tr -d ' ')"
-          test "$APPEX_COUNT" -ge 1
-          echo "Embedded widget extensions: $APPEX_COUNT"
-          find "$APP/PlugIns" -maxdepth 1 -name '*.appex' -type d -print
+          APPEX="$(find "$APP/PlugIns" -maxdepth 1 -name '*.appex' -type d -print -quit)"
+          test -n "$APPEX"
+          test -f "$APPEX/Info.plist"
+          test -d "$APPEX/Metadata.appintents"
+          echo "Embedded widget extension: $APPEX"
 
           rm -rf Payload
           mkdir Payload
           cp -R "$APP" Payload/
-          /usr/bin/zip -qry RJ-FurzApp-v2-unsigned.ipa Payload
-          unzip -t RJ-FurzApp-v2-unsigned.ipa
-          unzip -l RJ-FurzApp-v2-unsigned.ipa | grep -E 'PlugIns/.+\.appex/' | head
-          shasum -a 256 RJ-FurzApp-v2-unsigned.ipa
+          /usr/bin/zip -qry RJ-FurzApp-2.1-Friends-unsigned.ipa Payload
+          unzip -t RJ-FurzApp-2.1-Friends-unsigned.ipa
+          unzip -l RJ-FurzApp-2.1-Friends-unsigned.ipa | grep -E 'PlugIns/.+\.appex/' | head
+          shasum -a 256 RJ-FurzApp-2.1-Friends-unsigned.ipa
 
-      - name: Upload v2 IPA
+      - name: Upload 2.1 IPA
         if: success()
         uses: actions/upload-artifact@v4
         with:
-          name: RJ-FurzApp-v2-unsigned-IPA
-          path: RJ-FurzApp-v2-unsigned.ipa
+          name: RJ-FurzApp-2.1-Friends-unsigned-IPA
+          path: RJ-FurzApp-2.1-Friends-unsigned.ipa
           if-no-files-found: error
           retention-days: 7
           compression-level: 0
@@ -100,7 +104,7 @@ jobs:
         if: failure()
         uses: actions/upload-artifact@v4
         with:
-          name: RJ-FurzApp-v2-build-log
-          path: RJ-FurzApp-v2-build.log
+          name: RJ-FurzApp-2.1-build-log
+          path: RJ-FurzApp-2.1-build.log
           if-no-files-found: ignore
           retention-days: 7
