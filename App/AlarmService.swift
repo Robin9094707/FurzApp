@@ -30,11 +30,11 @@ enum FartAlarmKitService {
             systemImageName: "checkmark.circle.fill"
         )
         let alert = AlarmPresentation.Alert(
-            title: reminder.title,
+            title: "\(reminder.title)",
             stopButton: stopButton
         )
         let presentation = AlarmPresentation(alert: alert)
-        let attributes = AlarmAttributes(
+        let attributes = AlarmAttributes<FartAlarmMetadata>(
             presentation: presentation,
             metadata: FartAlarmMetadata(title: reminder.title),
             tintColor: Color.purple
@@ -48,7 +48,8 @@ enum FartAlarmKitService {
             recurrence = .weekly(weekdays(for: reminder))
         }
         let relative = Alarm.Schedule.Relative(time: time, repeats: recurrence)
-        let configuration = AlarmManager.AlarmConfiguration.alarm(
+        typealias FartAlarmConfiguration = AlarmManager.AlarmConfiguration<FartAlarmMetadata>
+        let configuration = FartAlarmConfiguration.alarm(
             schedule: .relative(relative),
             attributes: attributes
         )
@@ -59,14 +60,15 @@ enum FartAlarmKitService {
     static func schedulePartnerNudge(title: String, after seconds: TimeInterval = 60) async throws {
         let id = UUID()
         let stopButton = AlarmButton(text: "Okay 💨", textColor: .white, systemImageName: "wind")
-        let alert = AlarmPresentation.Alert(title: title, stopButton: stopButton)
-        let attributes = AlarmAttributes(
+        let alert = AlarmPresentation.Alert(title: "\(title)", stopButton: stopButton)
+        let attributes = AlarmAttributes<FartAlarmMetadata>(
             presentation: AlarmPresentation(alert: alert),
             metadata: FartAlarmMetadata(title: title),
             tintColor: Color.orange
         )
         let schedule = Alarm.Schedule.fixed(Date().addingTimeInterval(max(5, seconds)))
-        let configuration = AlarmManager.AlarmConfiguration.alarm(schedule: schedule, attributes: attributes)
+        typealias FartAlarmConfiguration = AlarmManager.AlarmConfiguration<FartAlarmMetadata>
+        let configuration = FartAlarmConfiguration.alarm(schedule: schedule, attributes: attributes)
         if AlarmManager.shared.authorizationState == .notDetermined {
             _ = try await requestAuthorization()
         }

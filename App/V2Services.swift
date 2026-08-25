@@ -93,7 +93,7 @@ enum AddressResolver {
             guard let p = placemarks.first else { return "" }
             let street = [p.thoroughfare, p.subThoroughfare].compactMap { $0 }.joined(separator: " ")
             let city = [p.postalCode, p.locality].compactMap { $0 }.joined(separator: " ")
-            return [street, city, p.country].filter { !$0.isEmpty }.joined(separator: ", ")
+            return [street, city, p.country ?? ""].filter { !$0.isEmpty }.joined(separator: ", ")
         } catch {
             DebugLogger.shared.log("Reverse-Geocoding fehlgeschlagen: \(error.localizedDescription)")
             return ""

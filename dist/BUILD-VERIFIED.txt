@@ -1,0 +1,4 @@
+RJ Furz-App v2 build verified successfully.
+Widget extension embedded: yes (1)
+Runner: macos-26
+Xcode 26.5 Build version 17F42 
